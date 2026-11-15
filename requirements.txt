@@ -1,8 +1,9 @@
 # Runtime do pipeline, API e UI (leve: roda em container pequeno, sem PyTorch).
-# A inferência usa o modelo exportado em ONNX via cv2.dnn.
+# A inferência usa o modelo exportado em ONNX via onnxruntime (metade da memória do cv2.dnn).
 numpy>=1.26,<3
 # <5: o OpenCV 5 removeu CascadeClassifier e os Haar cascades usados na anonimização
 opencv-python-headless>=4.10,<5
+onnxruntime>=1.18
 pandas>=2.1
 pyarrow>=15
 pillow>=10

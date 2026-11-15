@@ -3,7 +3,8 @@
 Três detectores com a mesma interface `detect(img, baseline_mask) -> list[Detection]`,
 todos recebendo a imagem letterbox (ex.: 640×640):
 
-- YoloOnnxDetector: modelo YOLO exportado em ONNX, roda com cv2.dnn (sem PyTorch).
+- YoloOnnxDetector: modelo YOLO exportado em ONNX, roda com onnxruntime (ou cv2.dnn
+                    se ele não estiver instalado), sem PyTorch.
 - YoloPtDetector:   pesos .pt via Ultralytics (precisa de requirements-ml.txt).
 - BaselineDetector: Canny + morfologia; usado para comparação e como fallback
   enquanto não há pesos treinados. A "confiança" dele é uma heurística, não
@@ -117,12 +118,36 @@ def _load_class_names(weights: Path) -> list[str]:
     return []
 
 
+def _onnxruntime_session(weights: Path):
+    """Sessão do onnxruntime com pouca memória; None se a biblioteca não estiver instalada.
+
+    Medido no container (YOLOv8s, 640 px): ~144 MB por inferência, contra ~290 MB do
+    cv2.dnn. Isso importa em hospedagens gratuitas com 512 MB de RAM (Render).
+    """
+    try:
+        import onnxruntime as ort
+    except ImportError:
+        return None
+    options = ort.SessionOptions()
+    options.enable_cpu_mem_arena = False  # devolve a memória ao sistema entre inferências
+    options.intra_op_num_threads = 1
+    options.inter_op_num_threads = 1
+    return ort.InferenceSession(str(weights), options, providers=["CPUExecutionProvider"])
+
+
 class YoloOnnxDetector:
     def __init__(self, weights: Path, size: int = 640, conf: float = 0.25, iou: float = 0.45):
-        self.net = cv2.dnn.readNetFromONNX(str(weights))
+        self.session = _onnxruntime_session(weights)
+        self.net = cv2.dnn.readNetFromONNX(str(weights)) if self.session is None else None
         self.size, self.conf, self.iou = size, conf, iou
         self.names = _load_class_names(weights)
         self.name = f"yolo_onnx:{weights.name}"
+
+    def _forward(self, blob: np.ndarray) -> np.ndarray:
+        if self.session is not None:
+            return self.session.run(None, {self.session.get_inputs()[0].name: blob})[0]
+        self.net.setInput(blob)
+        return self.net.forward()
 
     def _class_name(self, index: int) -> str:
         raw = self.names[index] if index < len(self.names) else f"class_{index}"
@@ -130,8 +155,7 @@ class YoloOnnxDetector:
 
     def detect(self, img: np.ndarray, baseline_mask: np.ndarray | None = None) -> list[Detection]:
         blob = cv2.dnn.blobFromImage(img, 1 / 255.0, (self.size, self.size), swapRB=True, crop=False)
-        self.net.setInput(blob)
-        out = self.net.forward()[0]
+        out = self._forward(blob)[0]
         # o blob é sempre size×size; converte de volta se a imagem tiver outro tamanho
         sx, sy = img.shape[1] / self.size, img.shape[0] / self.size
 
