@@ -44,7 +44,7 @@ permite ao painel mostrar as imagens em que nada foi encontrado e a área cobert
 
 | Arquivo | Conteúdo |
 |---|---|
-| `data/out/runs.jsonl` | Uma linha JSON por execução do agendador (início, fim, imagens, danos, chamados, erros e `imagens_removidas`: quantas imagens antigas saíram por passar de `MAX_IMAGES`) |
+| `data/out/runs.jsonl` | Uma linha JSON por execução do agendador (início, fim, imagens, danos, chamados, erros e `imagens_removidas`: quantas imagens saíram por passar de `MAX_IMAGES` — primeiro as sem dano, depois as mais antigas) |
 | `data/out/chamados/chamado_<id>.json` | Gatilho para o robô RPA: um arquivo por dano de severidade alta |
 | `data/out/thumbs/<id>.jpg` | Miniatura do overlay (112 px de largura), usada no ranking do painel |
 | `data/out/processed.json` | IDs das imagens já processadas (mantidos mesmo depois que a imagem é removida pelo limite) |

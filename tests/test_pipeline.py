@@ -291,6 +291,41 @@ def test_every_analysed_image_is_recorded_even_without_damage(settings, raw_imag
         assert (paths.annotated / f"{image['imagem_id']}.jpg").exists()
 
 
+def test_retention_removes_images_without_damage_before_damaged_ones(settings, road_image):
+    import os
+    import time
+
+    settings = replace(settings, max_images=2)
+    paths = settings.paths
+    reference = paths.intermediate / "00_original"
+
+    def process(name: str, shade: int, detector, age: int) -> tuple[str, dict]:
+        _, image_id = _add_raw(settings, road_image, name, shade)
+        summary = run_once(settings, detector=detector)
+        os.utime(reference / f"{image_id}.jpg", (time.time() - age,) * 2)
+        return image_id, summary
+
+    def stored() -> set[str]:
+        return {p.stem for p in reference.glob("*.jpg")}
+
+    damaged_old, _ = process("a.jpg", 1, _AlwaysHigh(), 500)
+    clean_old, _ = process("b.jpg", 2, _Nothing(), 400)
+
+    # passou do limite: sai a sem dano mais antiga, não a com dano (que é ainda mais antiga)
+    clean_new, summary = process("c.jpg", 3, _Nothing(), 300)
+    assert summary["imagens_removidas"] == 1 and stored() == {damaged_old, clean_new}
+
+    # chega outra com dano: a sem dano que restava sai, mesmo sendo mais recente
+    damaged_mid, summary = process("d.jpg", 4, _AlwaysHigh(), 200)
+    assert summary["imagens_removidas"] == 1 and stored() == {damaged_old, damaged_mid}
+
+    # só restam imagens com dano: aí sim sai a mais antiga
+    damaged_new, summary = process("e.jpg", 5, _AlwaysHigh(), 100)
+    assert summary["imagens_removidas"] == 1 and stored() == {damaged_mid, damaged_new}
+    assert {r["imagem_id"] for r in output.read_detections(paths)} == {damaged_mid, damaged_new}
+    assert [im["imagem_id"] for im in output.read_images(paths)] == [damaged_mid, damaged_new]
+
+
 def test_retention_also_forgets_the_image_record_and_thumbnail(settings, road_image):
     import os
     import time

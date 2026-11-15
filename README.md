@@ -144,10 +144,12 @@ correção de perspectiva. Danos de severidade alta devem ser validados por uma 
 ### Limite de imagens guardadas
 
 Cada imagem processada ocupa cerca de 0,8 MB (original anonimizada, etapas e overlay).
-Para a pasta `data/` não crescer até encher o disco, só as `MAX_IMAGES` mais recentes
+Para a pasta `data/` não crescer até encher o disco, no máximo `MAX_IMAGES` imagens
 ficam guardadas (padrão: 200; `0` desliga o limite). Ao passar do limite, cada execução
-remove das imagens mais antigas as etapas, o overlay e as linhas do parquet, e registra
-quantas saíram em `imagens_removidas` no `runs.jsonl`.
+remove primeiro as imagens **sem dano detectado**, da mais antiga para a mais recente.
+Imagens com dano (severidade baixa, média ou alta) só saem quando não resta nenhuma sem
+dano — e aí sai a mais antiga. A imagem removida perde as etapas, o overlay e as linhas
+do parquet, e a execução registra quantas saíram em `imagens_removidas` no `runs.jsonl`.
 
 Não são removidos: os chamados já abertos, as fotos colocadas à mão em `data/raw/` e as
 amostras de demonstração. Uma imagem removida nunca é processada nem baixada de novo

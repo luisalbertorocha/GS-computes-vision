@@ -96,8 +96,8 @@ class Settings:
     # modo demonstração: quantas imagens de samples/ entram por execução (0 = desligado)
     demo_seed_per_run: int = 0
     samples_dir: Path = ROOT / "samples"
-    # quantas imagens processadas ficam guardadas; ao passar disso as mais antigas são
-    # removidas (0 = sem limite)
+    # quantas imagens processadas ficam guardadas; ao passar disso saem primeiro as sem
+    # dano e depois as mais antigas (0 = sem limite)
     max_images: int = 200
 
 

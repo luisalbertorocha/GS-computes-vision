@@ -252,7 +252,8 @@ def status() -> None:
         "Imagens guardadas",
         f"{stored} de {settings.max_images}" if settings.max_images > 0 else stored,
         border=True,
-        help="Ao passar do limite (MAX_IMAGES), as imagens mais antigas são removidas sozinhas.",
+        help="Ao passar do limite (MAX_IMAGES), saem primeiro as imagens sem dano, das mais "
+        "antigas para as mais recentes. Imagens com dano só saem quando não resta nenhuma sem dano.",
     )
     c5.metric("Última execução", last["fim"][11:19] if last else "—", border=True)
 

@@ -15,7 +15,7 @@ services:
       # ~5 s; com 10 por execução o servidor passa o tempo todo processando e o painel trava
       - key: MAPILLARY_LIMIT
         value: "3"
-      # imagens guardadas; ao passar do limite, as mais antigas são removidas
+      # imagens guardadas; ao passar do limite, saem primeiro as sem dano (mais antigas antes)
       - key: MAX_IMAGES
         value: "200"
       # Preencher no painel do Render (não versionar segredos):
