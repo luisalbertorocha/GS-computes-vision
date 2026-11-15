@@ -32,10 +32,26 @@ def _ascii(text: str) -> str:
     return unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode()
 
 
-def draw_overlay(img: np.ndarray, records: list[dict]) -> np.ndarray:
+THUMB_WIDTH = 112  # miniatura do overlay mostrada no ranking do painel
+MUTED_COLOR = (170, 170, 170)  # BGR: danos da mesma imagem que não são o escolhido
+
+
+def draw_overlay(img: np.ndarray, records: list[dict], highlight_id: str | None = None) -> np.ndarray:
+    """Desenha as caixas dos danos sobre a imagem.
+
+    Com `highlight_id`, só esse dano recebe cor, traço grosso e rótulo; os outros danos da
+    imagem ficam em cinza fino, para ficar claro qual está selecionado no painel.
+    """
     out = img.copy()
     thickness = max(2, round(max(img.shape[:2]) / 400))
     font_scale = max(0.5, max(img.shape[:2]) / 1100)
+    if highlight_id is not None:
+        for record in records:
+            if record["id"] != highlight_id:
+                x, y, w, h = record["bbox"]
+                cv2.rectangle(out, (x, y), (x + w, y + h), MUTED_COLOR, max(1, thickness // 2))
+        records = [r for r in records if r["id"] == highlight_id]
+        thickness *= 2
     for record in records:
         x, y, w, h = record["bbox"]
         color = SEVERITY_COLORS[record["severidade"]]
@@ -50,8 +66,12 @@ def draw_overlay(img: np.ndarray, records: list[dict]) -> np.ndarray:
     return out
 
 
-def process_image(path: Path, image_id: str, settings: Settings, detector) -> list[dict]:
-    """Anonimiza -> pré-processa -> detecta -> mede -> classifica. Retorna as linhas do parquet."""
+def process_image(path: Path, image_id: str, settings: Settings, detector) -> tuple[list[dict], dict]:
+    """Anonimiza -> pré-processa -> detecta -> mede -> classifica.
+
+    Retorna (linhas de detections.parquet, linha de images.parquet). A segunda existe mesmo
+    quando nenhum dano é encontrado: é o registro de que a imagem foi analisada.
+    """
     paths = settings.paths
     raw = read_image(path)
     if raw is None:
@@ -108,8 +128,26 @@ def process_image(path: Path, image_id: str, settings: Settings, detector) -> li
             }
         )
 
-    write_image(annotated_path, draw_overlay(img, records))
-    return records
+    annotated = draw_overlay(img, records)
+    write_image(annotated_path, annotated)
+    # miniatura pronta: o painel não precisa abrir e reduzir a imagem a cada visita
+    thumb_height = max(1, round(height * THUMB_WIDTH / width))
+    write_image(
+        paths.thumbs / f"{image_id}.jpg",
+        cv2.resize(annotated, (THUMB_WIDTH, thumb_height), interpolation=cv2.INTER_AREA),
+    )
+    image_record = {
+        "imagem_id": image_id,
+        "captured_at": meta["captured_at"],
+        "processed_at": processed_at,
+        "lat": meta.get("lat"),
+        "lon": meta.get("lon"),
+        "fonte": meta.get("fonte") or settings.default_source,
+        "licenca": meta.get("licenca") or settings.default_license,
+        "danos": len(records),
+        "regioes_anonimizadas": len(regions),
+    }
+    return records, image_record
 
 
 def run_once(settings: Settings, detector=None, trigger: str = "agendado") -> dict:
@@ -132,20 +170,22 @@ def run_once(settings: Settings, detector=None, trigger: str = "agendado") -> di
         detector = load_detector(settings.weights, settings.img_size, settings.conf_threshold)
 
     records: list[dict] = []
-    done = 0
+    images: list[dict] = []
     for path, image_id in new_images:
         try:
-            found = process_image(path, image_id, settings, detector)
+            found, image_record = process_image(path, image_id, settings, detector)
         except Exception as exc:  # não marca como processada: tenta de novo na próxima execução
             log.exception("Falha em %s", path.name)
             errors.append(f"{path.name}: {exc}")
             continue
         log.info("%s -> %d dano(s)", path.name, len(found))
         records.extend(found)
+        images.append(image_record)
         processed.add(image_id)
-        done += 1
+    done = len(images)
 
     output.append_detections(paths, records)
+    output.append_images(paths, images)
     tickets = output.open_tickets(paths, records, settings.webhook_url, settings.ticket_min_confidence)
     output.save_state(paths, processed)
     removed = prune_old_images(settings)

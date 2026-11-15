@@ -263,3 +263,70 @@ def test_retention_is_disabled_with_zero(settings, road_image):
     summary = run_once(settings, detector=_AlwaysHigh())
     assert summary["imagens_processadas"] == 3 and summary["imagens_removidas"] == 0
     assert len(list((settings.paths.intermediate / "00_original").glob("*.jpg"))) == 3
+
+
+class _Nothing:
+    name = "fake"
+
+    def detect(self, img, baseline_mask=None):
+        return []
+
+
+def test_every_analysed_image_is_recorded_even_without_damage(settings, raw_image, road_image):
+    paths = settings.paths
+    run_once(settings, detector=_AlwaysHigh())
+    _, clean_id = _add_raw(settings, road_image, "sem_dano.jpg", 4)
+    summary = run_once(settings, detector=_Nothing())
+    assert summary["imagens_processadas"] == 1 and summary["danos_detectados"] == 0
+
+    images = output.read_images(paths)
+    assert list(pd.read_parquet(paths.images).columns) == output.IMAGE_COLUMNS
+    assert [im["danos"] for im in images] == [1, 0]  # ordem de processamento
+    damaged, clean = images
+    assert clean["imagem_id"] == clean_id and clean["lat"] is None
+    assert damaged["lat"] == -23.5614 and damaged["fonte"] == "sintetico"
+    # a miniatura do ranking é gravada pelo pipeline, para as duas
+    for image in images:
+        assert (paths.thumbs / f"{image['imagem_id']}.jpg").exists()
+        assert (paths.annotated / f"{image['imagem_id']}.jpg").exists()
+
+
+def test_retention_also_forgets_the_image_record_and_thumbnail(settings, road_image):
+    import os
+    import time
+
+    settings = replace(settings, max_images=1)
+    paths = settings.paths
+    _, old_id = _add_raw(settings, road_image, "a.jpg", 1)
+    run_once(settings, detector=_Nothing())
+    os.utime(paths.intermediate / "00_original" / f"{old_id}.jpg", (time.time() - 100,) * 2)
+    _, new_id = _add_raw(settings, road_image, "b.jpg", 2)
+    assert run_once(settings, detector=_Nothing())["imagens_removidas"] == 1
+
+    assert [im["imagem_id"] for im in output.read_images(paths)] == [new_id]
+    assert not (paths.thumbs / f"{old_id}.jpg").exists() and (paths.thumbs / f"{new_id}.jpg").exists()
+
+
+def test_overlay_highlights_only_the_chosen_damage(road_image):
+    import numpy as np
+
+    from src.pipeline import MUTED_COLOR, SEVERITY_COLORS, draw_overlay
+
+    records = [
+        {"id": "a", "bbox": [100, 100, 200, 150], "classe": "buraco", "confianca": 0.9, "severidade": "alta"},
+        {"id": "b", "bbox": [700, 400, 200, 150], "classe": "trinca", "confianca": 0.5, "severidade": "baixa"},
+    ]
+
+    def has(img, color, region):
+        x, y, w, h = region
+        return bool((img[y - 4 : y + h + 4, x - 4 : x + w + 4] == np.array(color, np.uint8)).all(axis=2).any())
+
+    both = draw_overlay(road_image, records)
+    assert has(both, SEVERITY_COLORS["alta"], records[0]["bbox"])
+    assert has(both, SEVERITY_COLORS["baixa"], records[1]["bbox"])
+
+    only_b = draw_overlay(road_image, records, highlight_id="b")
+    assert has(only_b, SEVERITY_COLORS["baixa"], records[1]["bbox"])  # escolhido: colorido
+    assert has(only_b, MUTED_COLOR, records[0]["bbox"])  # o outro: cinza
+    assert not has(only_b, SEVERITY_COLORS["alta"], records[0]["bbox"])
+    assert not np.array_equal(only_b, draw_overlay(road_image, records, highlight_id="a"))

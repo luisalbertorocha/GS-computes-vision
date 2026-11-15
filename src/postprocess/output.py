@@ -36,6 +36,19 @@ COLUMNS = [
 ]
 
 
+IMAGE_COLUMNS = [
+    "imagem_id",
+    "captured_at",
+    "processed_at",
+    "lat",
+    "lon",
+    "fonte",
+    "licenca",
+    "danos",
+    "regioes_anonimizadas",
+]
+
+
 def _atomic_write(path: Path, write) -> None:
     """Grava em arquivo temporário e renomeia: a API nunca lê um arquivo pela metade."""
     tmp = path.with_name(path.name + ".tmp")
@@ -72,16 +85,54 @@ def read_detections(paths: Paths) -> list[dict]:
     return records
 
 
-def remove_images(paths: Paths, image_ids: set[str]) -> int:
-    """Tira do parquet as detecções das imagens removidas pela retenção. Retorna quantas saíram."""
-    if not image_ids or not paths.parquet.exists():
+def _drop_images(file: Path, image_ids: set[str]) -> int:
+    if not file.exists():
         return 0
-    df = pd.read_parquet(paths.parquet)
+    df = pd.read_parquet(file)
     kept = df[~df["imagem_id"].isin(image_ids)]
-    if len(kept) == len(df):
-        return 0
-    _atomic_write(paths.parquet, lambda tmp: kept.to_parquet(tmp, index=False))
+    if len(kept) != len(df):
+        _atomic_write(file, lambda tmp: kept.to_parquet(tmp, index=False))
     return len(df) - len(kept)
+
+
+def remove_images(paths: Paths, image_ids: set[str]) -> int:
+    """Tira dos parquets as imagens removidas pela retenção. Retorna quantas detecções saíram."""
+    if not image_ids:
+        return 0
+    _drop_images(paths.images, image_ids)
+    return _drop_images(paths.parquet, image_ids)
+
+
+# ---------- images.parquet (toda imagem analisada, com ou sem dano) ----------
+
+def append_images(paths: Paths, records: list[dict]) -> int:
+    if not records:
+        return 0
+    new = pd.DataFrame(records, columns=IMAGE_COLUMNS)
+    if paths.images.exists():
+        old = pd.read_parquet(paths.images)
+        old = old[~old["imagem_id"].isin(new["imagem_id"])]
+        new = pd.concat([old, new], ignore_index=True)
+    _atomic_write(paths.images, lambda tmp: new.to_parquet(tmp, index=False))
+    return len(records)
+
+
+def read_images(paths: Paths) -> list[dict]:
+    """Imagens analisadas, na ordem em que foram processadas, prontas para JSON.
+
+    A ordem é a de gravação (as novas entram no fim), e não `processed_at`: o horário tem
+    precisão de segundo e empataria entre imagens da mesma execução.
+    """
+    if not paths.images.exists():
+        return []
+    df = pd.read_parquet(paths.images)
+    records = []
+    for row in df.to_dict(orient="records"):
+        for key in ("lat", "lon"):
+            if pd.isna(row[key]):
+                row[key] = None
+        records.append(row)
+    return records
 
 
 # ---------- estado (idempotência) ----------

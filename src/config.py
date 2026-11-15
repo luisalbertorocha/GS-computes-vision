@@ -40,8 +40,16 @@ class Paths:
         return self.out / "logs"
 
     @property
+    def thumbs(self) -> Path:  # miniaturas do overlay, usadas no ranking do painel
+        return self.out / "thumbs"
+
+    @property
     def parquet(self) -> Path:
         return self.out / "detections.parquet"
+
+    @property
+    def images(self) -> Path:  # uma linha por imagem analisada, com ou sem dano
+        return self.out / "images.parquet"
 
     @property
     def state(self) -> Path:  # hashes das imagens já processadas
@@ -56,7 +64,7 @@ class Paths:
         return self.out / "mapillary_seen.json"
 
     def ensure(self) -> "Paths":
-        for p in (self.raw, self.intermediate, self.annotated, self.tickets, self.logs):
+        for p in (self.raw, self.intermediate, self.annotated, self.thumbs, self.tickets, self.logs):
             p.mkdir(parents=True, exist_ok=True)
         return self
 

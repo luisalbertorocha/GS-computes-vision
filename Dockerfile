@@ -26,6 +26,11 @@ EXPOSE 8000 8501
 # (modo demonstração). O docker-compose sobrescreve tudo isso.
 ENV RUN_SCHEDULER_IN_UI=0 \
     DEMO_SEED_PER_RUN=1 \
-    PIPELINE_INTERVAL_SECONDS=60
+    PIPELINE_INTERVAL_SECONDS=60 \
+    MALLOC_ARENA_MAX=2
+# MALLOC_ARENA_MAX=2: o glibc cria uma arena de memória por thread e não as devolve; em
+# hospedagem com 512 MB isso derruba o container.
+# `nice`: o agendador roda com prioridade baixa de CPU, para o painel e o health check
+# continuarem respondendo enquanto as imagens são processadas (instâncias com CPU fracionada).
 # PORT é definido por plataformas como o Render; sem ele, usa 8501.
-CMD ["sh", "-c", "python -m scheduler.run_pipeline --loop & exec streamlit run src/ui/app.py --server.port=${PORT:-8501} --server.address=0.0.0.0 --server.headless=true --browser.gatherUsageStats=false"]
+CMD ["sh", "-c", "nice -n 15 python -m scheduler.run_pipeline --loop & exec streamlit run src/ui/app.py --server.port=${PORT:-8501} --server.address=0.0.0.0 --server.headless=true --browser.gatherUsageStats=false"]

@@ -111,4 +111,78 @@ def test_ui_warns_when_the_last_run_had_errors(settings, monkeypatch):
     assert not app.exception
     assert len(app.warning) == 1 and "quebrada.jpg" in app.warning[0].value
     assert app.metric[3].value == "0 de 200"
-    assert any("Nenhum dano registrado ainda" in el.value for el in app.info)  # estado vazio orienta
+    assert any("Nenhuma imagem analisada ainda" in el.value for el in app.info)  # estado vazio orienta
+
+
+def test_ui_lists_images_without_damage_and_highlights_the_chosen_damage(settings, raw_image, monkeypatch):
+    import json
+
+    import cv2
+    from streamlit.testing.v1 import AppTest
+
+    from src.model.infer import Detection
+
+    class _Two:
+        name = "fake"
+
+        def detect(self, img, baseline_mask=None):
+            return [
+                Detection("buraco", 0.9, (150, 300, 200, 120), 200 * 120),
+                Detection("trinca", 0.6, (400, 200, 120, 60), 120 * 60),
+            ]
+
+    class _Nothing:
+        name = "fake"
+
+        def detect(self, img, baseline_mask=None):
+            return []
+
+    run_once(settings, detector=_Two())  # Imagem 1: dois danos, com localização
+    clean = raw_image.with_name("limpa.jpg")  # Imagem 2: sem dano, com localização
+    cv2.imwrite(str(clean), cv2.flip(cv2.imread(str(raw_image)), 1))
+    clean.with_suffix(".json").write_text(json.dumps({"lat": -23.57, "lon": -46.66}), encoding="utf-8")
+    run_once(settings, detector=_Nothing())
+
+    monkeypatch.setenv("DATA_DIR", str(settings.paths.data))
+    monkeypatch.delenv("RUN_SCHEDULER_IN_UI", raising=False)
+    app = AppTest.from_file("../src/ui/app.py", default_timeout=60).run()
+    assert not app.exception
+
+    def html_block(marker: str) -> str:
+        return next(el.proto.body for el in app.get("html") if marker in el.proto.body)
+
+    # o seletor lista os danos e, depois, a imagem sem dano
+    selector = app.selectbox(key="det")
+    assert [o.split(" · ")[:2] for o in selector.options] == [
+        ["Imagem 1", "dano 1"], ["Imagem 1", "dano 2"], ["Imagem 2", "sem dano"]
+    ]
+    assert any("1 imagem analisada não teve dano detectado" in c.value for c in app.caption)
+
+    # trocar entre dois danos da MESMA imagem muda a foto (o escolhido fica em destaque)
+    rows = output.read_detections(settings.paths)
+    other = next(r["id"] for r in rows if r["id"] != selector.value)
+    first_photo = html_block('class="zcv-photo"')
+    selector.select(other).run()
+    assert not app.exception and html_block('class="zcv-photo"') != first_photo
+
+    # a imagem sem dano também pode ser inspecionada
+    app.selectbox(key="det").select("img:" + next(im["imagem_id"] for im in output.read_images(settings.paths) if not im["danos"])).run()
+    assert not app.exception
+    assert "Nenhum dano detectado" in html_block('class="zcv-facts"')
+    assert 'class="zcv-steps"' in html_block('class="zcv-steps"')
+
+    # mapa: os dois danos e a imagem sem dano (ponto cinza)
+    deck = json.loads(app.get("deck_gl_json_chart")[0].proto.json)
+    points = deck["layers"][0]["data"]
+    # raio em pixels (texto literal): como expressão, o pydeck desenha um ponto do tamanho do mapa
+    assert deck["layers"][0]["radiusUnits"] == "pixels"
+    assert [pt["detalhe"] for pt in points].count("Sem dano detectado") == 1 and len(points) == 3
+
+    # a escolha continua a mesma quando chega uma detecção nova
+    chosen = app.selectbox(key="det").value
+    new = raw_image.with_name("nova.jpg")
+    cv2.imwrite(str(new), cv2.flip(cv2.imread(str(raw_image)), 0))
+    run_once(settings, detector=_Two())
+    app.run()
+    assert not app.exception and app.selectbox(key="det").value == chosen
+    assert len(app.selectbox(key="det").options) == 5

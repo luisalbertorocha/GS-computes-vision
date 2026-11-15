@@ -9,6 +9,8 @@ que servem de evidência de que o fluxo roda sem intervenção humana.
 from __future__ import annotations
 
 import argparse
+import ctypes
+import gc
 import logging
 import time
 
@@ -17,6 +19,19 @@ from src.model.infer import load_detector
 from src.pipeline import run_once
 
 log = logging.getLogger("scheduler")
+
+
+def release_memory() -> None:
+    """Devolve ao sistema a memória que a execução usou e já liberou.
+
+    O alocador do glibc costuma segurar essa memória no processo; em hospedagem com 512 MB
+    isso soma com o painel e derruba o container. Só existe no Linux; fora dele não faz nada.
+    """
+    gc.collect()
+    try:
+        ctypes.CDLL("libc.so.6").malloc_trim(0)
+    except (OSError, AttributeError):
+        pass
 
 
 def main() -> None:
@@ -54,6 +69,7 @@ def main() -> None:
         )
         if not args.loop:
             break
+        release_memory()
         time.sleep(interval)
 
 

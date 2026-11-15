@@ -50,6 +50,7 @@ def prune_old_images(settings: Settings) -> int:
 
     for image_id in old_ids:
         (paths.annotated / f"{image_id}.jpg").unlink(missing_ok=True)
+        (paths.thumbs / f"{image_id}.jpg").unlink(missing_ok=True)
         for step_dir in paths.intermediate.iterdir():
             if step_dir.is_dir():
                 (step_dir / f"{image_id}.jpg").unlink(missing_ok=True)

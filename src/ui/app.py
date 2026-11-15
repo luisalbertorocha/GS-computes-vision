@@ -30,6 +30,7 @@ import streamlit as st  # noqa: E402
 
 from src.config import load_settings  # noqa: E402
 from src.io_utils import read_image  # noqa: E402
+from src.pipeline import draw_overlay  # noqa: E402
 from src.postprocess import output  # noqa: E402
 from src.postprocess import severity  # noqa: E402
 from src.postprocess.geo import TZ_BR  # noqa: E402
@@ -48,6 +49,8 @@ SEVERITY = {
     "baixa": ("🟢", "Baixa", "#0ca30c"),
 }
 SEVERITY_ORDER = ["alta", "média", "baixa"]
+NO_DAMAGE_COLOR = "#b4bac4"  # imagens analisadas sem dano (mapa)
+IMAGE_PREFIX = "img:"  # no seletor, separa "imagem sem dano" de um id de detecção
 
 _CSS = """
 <style>
@@ -60,6 +63,8 @@ _CSS = """
 .zcv-facts dd { margin: 0; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 .zcv-sev { display: inline-flex; align-items: center; gap: 0.4rem; font-weight: 600; }
 .zcv-sev i { width: 0.7rem; height: 0.7rem; border-radius: 50%; display: inline-block; }
+/* o seletor é um campo com busca; sem isto o cursor é o de texto e não parece clicável */
+[data-testid="stSelectbox"] input { cursor: pointer; }
 </style>
 """
 
@@ -123,7 +128,7 @@ def _plural(n: int, one: str, many: str) -> str:
 
 # ---------- imagens embutidas ----------
 
-@st.cache_data(max_entries=128, show_spinner=False)
+@st.cache_data(max_entries=48, show_spinner=False)
 def _data_uri(path: str, mtime: float) -> str:
     """Imagem embutida em base64; `mtime` invalida o cache quando o arquivo muda."""
     return "data:image/jpeg;base64," + base64.b64encode(Path(path).read_bytes()).decode()
@@ -147,6 +152,26 @@ def _embedded(path: Path, thumb: bool = False) -> str | None:
     return (_thumb_uri if thumb else _data_uri)(str(path), path.stat().st_mtime)
 
 
+def _row_thumb(image_id: str, annotated: Path) -> str | None:
+    """Miniatura gravada pelo pipeline; dados antigos, sem ela, reduzem a foto anotada na hora."""
+    return _embedded(paths.thumbs / f"{image_id}.jpg") or _embedded(annotated, thumb=True)
+
+
+@st.cache_data(max_entries=32, show_spinner=False)
+def _highlight_uri(original: str, mtime: float, chosen: str, boxes: tuple) -> str | None:
+    """Foto com o dano escolhido em destaque e os outros danos da imagem em cinza."""
+    img = read_image(Path(original))
+    if img is None:
+        return None
+    records = [
+        {"id": i, "bbox": list(bbox), "classe": classe, "confianca": conf, "severidade": sev}
+        for i, bbox, classe, conf, sev in boxes
+    ]
+    overlay = draw_overlay(img, records, highlight_id=chosen)
+    ok, encoded = cv2.imencode(".jpg", overlay, [cv2.IMWRITE_JPEG_QUALITY, 88])
+    return "data:image/jpeg;base64," + base64.b64encode(encoded.tobytes()).decode() if ok else None
+
+
 def _steps_gallery(images: list[tuple[str, Path]]) -> str:
     """Grade responsiva com as imagens embutidas: chegam junto com a página, sem download à parte."""
     figures = "".join(
@@ -159,20 +184,23 @@ def _steps_gallery(images: list[tuple[str, Path]]) -> str:
 
 # ---------- nomes legíveis ----------
 
-def _detection_names(df: pd.DataFrame) -> dict[str, str]:
-    """Nome curto de cada detecção: 'Imagem 3' ou 'Imagem 3 · dano 2'.
+def _image_numbers(images: list[dict], rows: list[dict]) -> dict[str, int]:
+    """Número de cada imagem pela ordem de processamento: não muda quando chegam novas.
 
-    As imagens são numeradas pela ordem de processamento, então o número de uma imagem
-    não muda quando chegam novas. Quando uma imagem tem mais de um dano, eles viram
-    'dano 1', 'dano 2'...
+    Dados antigos, sem images.parquet, são numerados só pelas imagens que têm detecção.
     """
-    order = df.sort_values(["processed_at", "imagem_id"]).drop_duplicates("imagem_id")["imagem_id"]
-    number = {image_id: n for n, image_id in enumerate(order, start=1)}
+    known = [im["imagem_id"] for im in images]  # já vem na ordem de processamento
+    extra = sorted({(r["processed_at"], r["imagem_id"]) for r in rows if r["imagem_id"] not in set(known)})
+    return {image_id: n for n, image_id in enumerate(known + [image_id for _, image_id in extra], start=1)}
+
+
+def _detection_names(df: pd.DataFrame, numbers: dict[str, int]) -> dict[str, str]:
+    """Nome curto de cada detecção: 'Imagem 3' ou, com mais de um dano na imagem, 'Imagem 3 · dano 2'."""
     per_image = df.groupby("imagem_id")["id"].transform("count")
     names = {}
     for (_, r), count in zip(df.iterrows(), per_image):
         damage = f" · dano {int(r['id'].rsplit('_', 1)[1]) + 1}" if count > 1 else ""
-        names[r["id"]] = f"Imagem {number[r['imagem_id']]}{damage}"
+        names[r["id"]] = f"Imagem {numbers[r['imagem_id']]}{damage}"
     return names
 
 
@@ -242,7 +270,13 @@ def status() -> None:
         if settings.demo_seed_per_run > 0
         else ""
     )
-    st.caption(summary + history + ephemeral)
+    clean = sum(im["danos"] == 0 for im in output.read_images(paths))
+    no_damage = (
+        f" {_plural(clean, 'imagem analisada não teve', 'imagens analisadas não tiveram')} dano detectado."
+        if clean
+        else ""
+    )
+    st.caption(summary + no_damage + history + ephemeral)
 
     def source(active: bool, on: str, off: str) -> str:
         return f":green-badge[:material/check: {on}]" if active else f":gray-badge[{off}]"
@@ -280,7 +314,7 @@ def _ranking(tab, df: pd.DataFrame, names: dict[str, str]) -> None:
         else:
             table = pd.DataFrame(
                 {
-                    "Foto": [_embedded(paths.data / p, thumb=True) for p in shown["img_anotada"]],
+                    "Foto": [_row_thumb(i, paths.data / p) for i, p in zip(shown["imagem_id"], shown["img_anotada"])],
                     "Imagem": [names[i] for i in shown["id"]],
                     "Tipo": shown["classe"].map(_kind).tolist(),
                     "Severidade": shown["severidade"].map(_severity_text).tolist(),
@@ -313,41 +347,99 @@ def _ranking(tab, df: pd.DataFrame, names: dict[str, str]) -> None:
         )
 
 
-def _facts(row: dict, name: str) -> str:
-    _, label, color = SEVERITY.get(row["severidade"], ("", row["severidade"], "#888888"))
-    facts = [
-        ("Detecção", html.escape(name)),
-        ("Tipo", html.escape(_kind(row["classe"]))),
-        ("Severidade", f'<span class="zcv-sev"><i style="background:{color}"></i>{html.escape(label)}</span>'),
-        ("Score", f"{row['score_severidade']:.2f} de 1"),
-        ("Confiança", f"{row['confianca'] * 100:.0f}%"),
-        ("Área estimada", f"{row['area_cm2']:,.0f} cm²".replace(",", ".")),
-        ("Local", _place(row["lat"], row["lon"])),
-        ("Capturada em", _br_datetime(row["captured_at"])),
-        ("Processada em", _br_datetime(row["processed_at"])),
-        ("Fonte", html.escape(str(row["fonte"]))),
-        ("Modelo", html.escape(str(row["modelo"]))),
-        ("Rostos e placas desfocados", str(row["regioes_anonimizadas"])),
-    ]
+def _facts_html(facts: list[tuple[str, str]]) -> str:
     return '<dl class="zcv-facts">' + "".join(f"<dt>{k}</dt><dd>{v}</dd>" for k, v in facts) + "</dl>"
 
 
-def _transformations(tab, rows: list[dict], df: pd.DataFrame, names: dict[str, str]) -> None:
+def _facts(row: dict, name: str) -> str:
+    _, label, color = SEVERITY.get(row["severidade"], ("", row["severidade"], "#888888"))
+    return _facts_html(
+        [
+            ("Detecção", html.escape(name)),
+            ("Tipo", html.escape(_kind(row["classe"]))),
+            ("Severidade", f'<span class="zcv-sev"><i style="background:{color}"></i>{html.escape(label)}</span>'),
+            ("Score", f"{row['score_severidade']:.2f} de 1"),
+            ("Confiança", f"{row['confianca'] * 100:.0f}%"),
+            ("Área estimada", f"{row['area_cm2']:,.0f} cm²".replace(",", ".")),
+            ("Local", _place(row["lat"], row["lon"])),
+            ("Capturada em", _br_datetime(row["captured_at"])),
+            ("Processada em", _br_datetime(row["processed_at"])),
+            ("Fonte", html.escape(str(row["fonte"]))),
+            ("Modelo", html.escape(str(row["modelo"]))),
+            ("Rostos e placas desfocados", str(row["regioes_anonimizadas"])),
+        ]
+    )
+
+
+def _image_facts(image: dict, name: str) -> str:
+    return _facts_html(
+        [
+            ("Imagem", html.escape(name)),
+            ("Resultado", "Nenhum dano detectado"),
+            ("Local", _place(image["lat"], image["lon"])),
+            ("Capturada em", _br_datetime(image["captured_at"])),
+            ("Processada em", _br_datetime(image["processed_at"])),
+            ("Fonte", html.escape(str(image["fonte"]))),
+            ("Rostos e placas desfocados", str(image["regioes_anonimizadas"])),
+        ]
+    )
+
+
+def _damage_photo(row: dict, rows: list[dict]) -> str | None:
+    """Foto com o dano escolhido em destaque; sem a original guardada, cai na foto anotada."""
+    original = paths.intermediate / "00_original" / f"{row['imagem_id']}.jpg"
+    if original.exists():
+        boxes = tuple(
+            (r["id"], tuple(r["bbox"]), r["classe"], r["confianca"], r["severidade"])
+            for r in rows
+            if r["imagem_id"] == row["imagem_id"]
+        )
+        highlighted = _highlight_uri(str(original), original.stat().st_mtime, row["id"], boxes)
+        if highlighted:
+            return highlighted
+    return _embedded(paths.data / row["img_anotada"])
+
+
+def _transformations(
+    tab, rows: list[dict], df: pd.DataFrame | None, clean: list[dict], numbers: dict[str, int], names: dict[str, str]
+) -> None:
+    """Seletor com todas as imagens analisadas: primeiro os danos (por score), depois as sem dano."""
     with tab:
-        ids = df["id"].tolist()
-        if st.session_state.get("det") not in ids:  # a detecção escolhida pode ter sido removida
+        labels = _detection_labels(df, names) if df is not None else {}
+        ids = df["id"].tolist() if df is not None else []
+        clean_by_key = {IMAGE_PREFIX + im["imagem_id"]: im for im in reversed(clean)}  # mais recentes primeiro
+        for key, im in clean_by_key.items():
+            labels[key] = f"Imagem {numbers[im['imagem_id']]} · sem dano · {_br_datetime(im['captured_at'])}"
+        ids += list(clean_by_key)
+        if st.session_state.get("det") not in ids:  # a escolhida pode ter sido removida pelo limite
             st.session_state.pop("det", None)
-        labels = _detection_labels(df, names)
-        chosen = st.selectbox("Detecção", ids, key="det", format_func=labels.get)
-        row = next(r for r in rows if r["id"] == chosen)
+        chosen = st.selectbox(
+            "Imagem analisada",
+            ids,
+            key="det",
+            format_func=labels.get,
+            help="Primeiro os danos, do score mais alto para o mais baixo; depois as imagens sem dano.",
+        )
+
+        row = None
+        if chosen in clean_by_key:
+            image = clean_by_key[chosen]
+            image_id = image["imagem_id"]
+            photo_uri = _embedded(paths.annotated / f"{image_id}.jpg")
+            alt = "Foto analisada, sem danos detectados"
+            facts = _image_facts(image, f"Imagem {numbers[image_id]}")
+        else:
+            row = next(r for r in rows if r["id"] == chosen)
+            image_id = row["imagem_id"]
+            photo_uri = _damage_photo(row, rows)
+            alt = "Foto com o dano escolhido em destaque"
+            facts = _facts(row, names[chosen])
         steps = [
-            (label, paths.intermediate / step / f"{row['imagem_id']}.jpg")
-            for step, label in STEP_LABELS.items()
+            (label, paths.intermediate / step / f"{image_id}.jpg") for step, label in STEP_LABELS.items()
         ]
         steps = [(label, p) for label, p in steps if p.exists()]
-        annotated = _embedded(paths.data / row["img_anotada"])
 
-        # Aviso de carregamento só quando a detecção muda. Não usa st.spinner: ele só aparece
+        # Aviso de carregamento só quando a escolha muda. Não usa st.spinner: ele só aparece
         # após 0,5 s, e ler os arquivos é mais rápido que isso; a espera real é a transferência
         # das imagens até o navegador. Como as imagens vão embutidas no HTML, o aviso só some
         # depois que elas chegam.
@@ -357,39 +449,93 @@ def _transformations(tab, rows: list[dict], df: pd.DataFrame, names: dict[str, s
             loading.info("⏳ Carregando as transformações…")
 
         photo, details = st.columns([3, 2], gap="large")
-        if annotated:
-            photo.html(
-                f'<figure class="zcv-photo"><img src="{annotated}" '
-                f'alt="Foto com os danos detectados marcados"></figure>'
-            )
-        details.html(_facts(row, names[chosen]))
+        if photo_uri:
+            photo.html(f'<figure class="zcv-photo"><img src="{photo_uri}" alt="{alt}"></figure>')
+        details.html(facts)
 
         st.subheader("Etapas do pré-processamento")
         st.html(_steps_gallery(steps))
         loading.empty()
         st.session_state["_det_exibida"] = chosen
 
-        with st.expander("Dados brutos (JSON)"):
-            st.json(row)
+        if row is not None:
+            with st.expander("Dados brutos (JSON)"):
+                st.json(row)
 
 
-def _map(tab, df: pd.DataFrame) -> None:
+def _rgb(hex_color: str, alpha: int = 230) -> list[int]:
+    return [int(hex_color[i : i + 2], 16) for i in (1, 3, 5)] + [alpha]
+
+
+def _map(tab, df: pd.DataFrame | None, clean: list[dict], numbers: dict[str, int], names: dict[str, str]) -> None:
+    """Danos coloridos por severidade e, em cinza, as imagens analisadas sem dano (área coberta)."""
+    import pydeck as pdk
+
     with tab:
-        geo = df.dropna(subset=["lat", "lon"]).copy()
-        if geo.empty:
+        points = [
+            {
+                "lat": im["lat"],
+                "lon": im["lon"],
+                "cor": _rgb(NO_DAMAGE_COLOR, 215),
+                "raio": 5,
+                "titulo": f"Imagem {numbers[im['imagem_id']]}",
+                "detalhe": "Sem dano detectado",
+            }
+            for im in clean
+            if im["lat"] is not None and im["lon"] is not None
+        ]
+        covered = len(points)
+        damages = 0
+        if df is not None:
+            # maiores primeiro: quando vários danos caem no mesmo ponto, os menores ficam por cima
+            for _, r in df.dropna(subset=["lat", "lon"]).iterrows():
+                _, label, color = SEVERITY.get(r["severidade"], ("", r["severidade"], "#888888"))
+                points.append(
+                    {
+                        "lat": r["lat"],
+                        "lon": r["lon"],
+                        "cor": _rgb(color),
+                        "raio": 7 + 9 * r["score_severidade"],
+                        "titulo": names[r["id"]],
+                        "detalhe": (
+                            f"{_kind(r['classe'])}, severidade {label.lower()}, "
+                            f"score {r['score_severidade']:.2f}"
+                        ),
+                    }
+                )
+                damages += 1
+        if not points:
             st.info(
-                "Nenhuma detecção com localização ainda. As amostras de demonstração não têm "
-                "coordenadas; fotos do Mapillary ou com GPS aparecem aqui."
+                "Nenhuma imagem com localização ainda. As amostras de demonstração não têm "
+                "coordenadas; fotos do Mapillary ou com GPS aparecem aqui assim que são analisadas."
             )
             return
-        geo["cor"] = geo["severidade"].map(lambda s: SEVERITY.get(s, ("", "", "#888888"))[2])
-        geo["tamanho"] = 12 + 40 * geo["score_severidade"]  # raio em metros
-        st.map(geo, latitude="lat", longitude="lon", color="cor", size="tamanho")
+        data = pd.DataFrame(points)
+        view = pdk.data_utils.compute_view(data[["lon", "lat"]].values.tolist(), view_proportion=1)
+        view.zoom = min(view.zoom, 16)  # um ponto só não deve abrir no zoom máximo
+        layer = pdk.Layer(
+            "ScatterplotLayer",
+            data=data,
+            get_position="[lon, lat]",
+            get_fill_color="cor",
+            get_radius="raio",
+            # tamanho fixo na tela: o ponto não some ao afastar o mapa. Precisa de types.String:
+            # o pydeck trata texto puro como expressão, e o raio viraria gigante.
+            radius_units=pdk.types.String("pixels"),
+            stroked=True,
+            get_line_color=[27, 30, 35],
+            line_width_min_pixels=1,
+            pickable=True,
+        )
+        st.pydeck_chart(
+            pdk.Deck(layers=[layer], initial_view_state=view, tooltip={"html": "<b>{titulo}</b><br/>{detalhe}"}),
+            height=520,
+        )
         st.caption(
             " ".join(_severity_text(level) for level in SEVERITY_ORDER)
-            + ". Quanto maior o ponto, maior o score. "
-            + _plural(len(geo), "dano com localização", "danos com localização")
-            + f" de {len(df)}."
+            + " ⚪ Sem dano. Quanto maior o ponto, maior o score. Passe o mouse sobre um ponto para ver o que é. "
+            + f"No mapa: {_plural(damages, 'dano', 'danos')} e "
+            + f"{_plural(covered, 'imagem sem dano', 'imagens sem dano')}."
         )
 
 
@@ -492,24 +638,33 @@ A área é uma estimativa (escala fixa de pixels para centímetros). Casos de se
 @st.fragment
 def tabs() -> None:
     rows = output.read_detections(paths)
+    images = output.read_images(paths)
+    clean = [im for im in images if im["danos"] == 0]
+    numbers = _image_numbers(images, rows)
     tab_rank, tab_steps, tab_map, tab_tickets, tab_runs, tab_about = st.tabs(
         ["Ranking de prioridade", "Transformações", "Mapa", "Chamados", "Execuções automáticas",
          "Como o score funciona"]
     )
-    names: dict[str, str] = {}
-    if not rows:
+    df = pd.DataFrame(rows).sort_values("score_severidade", ascending=False) if rows else None
+    names = _detection_names(df, numbers) if df is not None else {}
+
+    if df is not None:
+        _ranking(tab_rank, df, names)
+    elif clean:
+        tab_rank.info(
+            f"Nenhum dano detectado nas {_plural(len(clean), 'imagem analisada', 'imagens analisadas')} "
+            "até agora. Veja cada uma na aba Transformações."
+        )
+    if df is None and not clean:
         empty = (
-            "Nenhum dano registrado ainda. Coloque imagens em `data/raw`, configure o Mapillary "
+            "Nenhuma imagem analisada ainda. Coloque imagens em `data/raw`, configure o Mapillary "
             "ou ligue o modo demonstração; elas entram na próxima execução do agendador."
         )
         for tab in (tab_rank, tab_steps, tab_map):
             tab.info(empty)
     else:
-        df = pd.DataFrame(rows).sort_values("score_severidade", ascending=False)
-        names = _detection_names(df)
-        _ranking(tab_rank, df, names)
-        _transformations(tab_steps, rows, df, names)
-        _map(tab_map, df)
+        _transformations(tab_steps, rows, df, clean, numbers, names)
+        _map(tab_map, df, clean, numbers, names)
     _tickets(tab_tickets, names)
     with tab_runs:
         _runs_table()

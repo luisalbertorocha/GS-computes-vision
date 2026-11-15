@@ -25,12 +25,28 @@ Uma linha por dano detectado. Também disponível em JSON pela API (`GET /detect
 
 Caminhos são relativos à pasta `data/`. Na API, as imagens ficam em `/files/<caminho>`.
 
+## `data/out/images.parquet`
+
+Uma linha por imagem analisada, **com ou sem dano**, na ordem de processamento. É o que
+permite ao painel mostrar as imagens em que nada foi encontrado e a área coberta no mapa.
+
+| Coluna | Tipo | Exemplo | Descrição |
+|---|---|---|---|
+| `imagem_id` | texto | `8c66fe06d36c` | Hash do conteúdo da imagem (mesmo id usado em `detections.parquet`) |
+| `captured_at` | data/hora ISO | `2024-05-10T14:20:00-03:00` | Quando a foto foi tirada (sidecar/EXIF) ou chegou à pasta |
+| `processed_at` | data/hora ISO | `2026-11-15T07:39:30-03:00` | Quando o pipeline analisou a imagem |
+| `lat`, `lon` | número | `-23.5614`, `-46.6559` | Localização, quando conhecida |
+| `fonte`, `licenca` | texto | `mapillary`, `CC-BY-SA 4.0` | Origem e licença da imagem |
+| `danos` | inteiro | `0` | Quantos danos foram detectados na imagem |
+| `regioes_anonimizadas` | inteiro | `2` | Rostos e placas desfocados antes de gravar |
+
 ## Arquivos relacionados
 
 | Arquivo | Conteúdo |
 |---|---|
 | `data/out/runs.jsonl` | Uma linha JSON por execução do agendador (início, fim, imagens, danos, chamados, erros e `imagens_removidas`: quantas imagens antigas saíram por passar de `MAX_IMAGES`) |
 | `data/out/chamados/chamado_<id>.json` | Gatilho para o robô RPA: um arquivo por dano de severidade alta |
+| `data/out/thumbs/<id>.jpg` | Miniatura do overlay (112 px de largura), usada no ranking do painel |
 | `data/out/processed.json` | IDs das imagens já processadas (mantidos mesmo depois que a imagem é removida pelo limite) |
 | `data/out/mapillary_seen.json` | IDs do Mapillary já baixados, para uma foto removida pelo limite não ser baixada de novo |
 | `data/out/logs/pipeline.log` | Log textual do agendador |

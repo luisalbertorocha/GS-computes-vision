@@ -78,7 +78,8 @@ detecção (YOLOv8s em ONNX; sem pesos, baseline clássico)
 pós-processamento ──► área em cm², score e faixa de severidade, lat/lon
    │
    ├──► data/out/detections.parquet        (dicionário: docs/dicionario_dados.md)
-   ├──► data/out/annotated/<id>.jpg        (overlay)
+   ├──► data/out/images.parquet            (toda imagem analisada, com ou sem dano)
+   ├──► data/out/annotated/<id>.jpg        (overlay) e data/out/thumbs/<id>.jpg (miniatura)
    ├──► data/out/chamados/chamado_<id>.json + POST no WEBHOOK_URL   (severidade alta)
    └──► data/out/runs.jsonl                (evidência de cada execução automática)
 ```
@@ -137,7 +138,7 @@ correção de perspectiva. Danos de severidade alta devem ser validados por uma 
 | Origem | Como ativar |
 |---|---|
 | Pasta monitorada | Nada a configurar: qualquer imagem nova em `data/raw/` é processada |
-| Mapillary | `MAPILLARY_TOKEN` e `MAPILLARY_BBOX` no `.env`; cada execução baixa até `MAPILLARY_LIMIT` imagens novas da região (a área da bbox precisa ser menor que 0,01 grau²) |
+| Mapillary | `MAPILLARY_TOKEN` e `MAPILLARY_BBOX` no `.env`; cada execução baixa até `MAPILLARY_LIMIT` imagens novas da região (a área da bbox precisa ser menor que 0,01 grau²). Em hospedagem pequena use `MAPILLARY_LIMIT=3`: no Render gratuito cada foto leva ~5 s para processar |
 | Modo demonstração | `DEMO_SEED_PER_RUN=1`: uma imagem de `samples/` por execução, identificada na coluna `fonte` |
 
 ### Limite de imagens guardadas
@@ -173,6 +174,10 @@ deploy, a cada mudança de variável de ambiente e quando o serviço acorda depo
 parado. O histórico recomeça e a coleta enche o painel de novo sozinha; o próprio painel
 avisa isso e mostra desde quando há histórico. Para manter os dados entre deploys é preciso
 um disco persistente (pago) ou rodar com `docker compose`, que usa a pasta `./data`.
+
+No Render gratuito (0,1 CPU e 512 MB) o agendador roda com prioridade baixa de CPU (`nice`) e
+devolve a memória ao sistema depois de cada execução, para o painel continuar respondendo
+enquanto as imagens são processadas; o `render.yaml` já limita a coleta a 3 fotos por execução.
 
 Para coleta real no deploy, cadastre `MAPILLARY_TOKEN`, `MAPILLARY_BBOX` e `WEBHOOK_URL`
 como variáveis de ambiente da plataforma (nunca no repositório).
