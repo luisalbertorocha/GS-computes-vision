@@ -305,28 +305,3 @@ def test_retention_also_forgets_the_image_record_and_thumbnail(settings, road_im
 
     assert [im["imagem_id"] for im in output.read_images(paths)] == [new_id]
     assert not (paths.thumbs / f"{old_id}.jpg").exists() and (paths.thumbs / f"{new_id}.jpg").exists()
-
-
-def test_overlay_highlights_only_the_chosen_damage(road_image):
-    import numpy as np
-
-    from src.pipeline import MUTED_COLOR, SEVERITY_COLORS, draw_overlay
-
-    records = [
-        {"id": "a", "bbox": [100, 100, 200, 150], "classe": "buraco", "confianca": 0.9, "severidade": "alta"},
-        {"id": "b", "bbox": [700, 400, 200, 150], "classe": "trinca", "confianca": 0.5, "severidade": "baixa"},
-    ]
-
-    def has(img, color, region):
-        x, y, w, h = region
-        return bool((img[y - 4 : y + h + 4, x - 4 : x + w + 4] == np.array(color, np.uint8)).all(axis=2).any())
-
-    both = draw_overlay(road_image, records)
-    assert has(both, SEVERITY_COLORS["alta"], records[0]["bbox"])
-    assert has(both, SEVERITY_COLORS["baixa"], records[1]["bbox"])
-
-    only_b = draw_overlay(road_image, records, highlight_id="b")
-    assert has(only_b, SEVERITY_COLORS["baixa"], records[1]["bbox"])  # escolhido: colorido
-    assert has(only_b, MUTED_COLOR, records[0]["bbox"])  # o outro: cinza
-    assert not has(only_b, SEVERITY_COLORS["alta"], records[0]["bbox"])
-    assert not np.array_equal(only_b, draw_overlay(road_image, records, highlight_id="a"))

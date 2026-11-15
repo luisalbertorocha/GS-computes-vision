@@ -78,7 +78,7 @@ def test_ui_renders_without_errors(settings, raw_image, monkeypatch):
     def gallery_html() -> str:
         return html_block('class="zcv-steps"')
 
-    assert "data:image/jpeg;base64," in html_block('class="zcv-photo"')  # foto anotada em destaque
+    assert "data:image/jpeg;base64," in html_block('class="zcv-photo"')  # foto com o dano em destaque
     assert "Severidade" in html_block('class="zcv-facts"')
 
     assert gallery_html().count("data:image/jpeg;base64,") >= 2
@@ -162,8 +162,20 @@ def test_ui_lists_images_without_damage_and_highlights_the_chosen_damage(setting
     rows = output.read_detections(settings.paths)
     other = next(r["id"] for r in rows if r["id"] != selector.value)
     first_photo = html_block('class="zcv-photo"')
+    # caixas desenhadas em HTML sobre a foto: o escolhido com rótulo completo (com acento),
+    # o outro dano tracejado
+    assert first_photo.count('class="zcv-box is-chosen"') == 1 and first_photo.count('class="zcv-box is-other"') == 1
+    assert "Buraco · 90% · Alta" in first_photo
     selector.select(other).run()
-    assert not app.exception and html_block('class="zcv-photo"') != first_photo
+    second_photo = html_block('class="zcv-photo"')
+    assert not app.exception and second_photo != first_photo
+    assert "Trinca · 60% · " in second_photo
+    # a foto vai sem recompressão: os mesmos bytes do arquivo original
+    import base64
+
+    image_id = next(r["imagem_id"] for r in rows)
+    original = (settings.paths.intermediate / "00_original" / f"{image_id}.jpg").read_bytes()
+    assert base64.b64encode(original).decode() in second_photo
 
     # a imagem sem dano também pode ser inspecionada
     app.selectbox(key="det").select("img:" + next(im["imagem_id"] for im in output.read_images(settings.paths) if not im["danos"])).run()

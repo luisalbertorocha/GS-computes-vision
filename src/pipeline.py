@@ -33,35 +33,28 @@ def _ascii(text: str) -> str:
 
 
 THUMB_WIDTH = 112  # miniatura do overlay mostrada no ranking do painel
-MUTED_COLOR = (170, 170, 170)  # BGR: danos da mesma imagem que não são o escolhido
 
 
-def draw_overlay(img: np.ndarray, records: list[dict], highlight_id: str | None = None) -> np.ndarray:
-    """Desenha as caixas dos danos sobre a imagem.
+def draw_overlay(img: np.ndarray, records: list[dict]) -> np.ndarray:
+    """Desenha as caixas dos danos sobre a imagem (arquivo anotado, API e miniaturas).
 
-    Com `highlight_id`, só esse dano recebe cor, traço grosso e rótulo; os outros danos da
-    imagem ficam em cinza fino, para ficar claro qual está selecionado no painel.
+    No painel as caixas são desenhadas pelo navegador, por cima da foto original.
     """
     out = img.copy()
     thickness = max(2, round(max(img.shape[:2]) / 400))
+    text_thickness = max(1, thickness // 2)  # texto mais fino que a caixa: legível, sem borrar
     font_scale = max(0.5, max(img.shape[:2]) / 1100)
-    if highlight_id is not None:
-        for record in records:
-            if record["id"] != highlight_id:
-                x, y, w, h = record["bbox"]
-                cv2.rectangle(out, (x, y), (x + w, y + h), MUTED_COLOR, max(1, thickness // 2))
-        records = [r for r in records if r["id"] == highlight_id]
-        thickness *= 2
     for record in records:
         x, y, w, h = record["bbox"]
         color = SEVERITY_COLORS[record["severidade"]]
-        cv2.rectangle(out, (x, y), (x + w, y + h), color, thickness)
+        cv2.rectangle(out, (x, y), (x + w, y + h), color, thickness, cv2.LINE_AA)
         label = _ascii(f"{record['classe']} {record['confianca']:.2f} | {record['severidade']}")
-        (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, font_scale, thickness)
+        (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, font_scale, text_thickness)
         top = max(th + 8, y)
         cv2.rectangle(out, (x, top - th - 8), (x + tw + 6, top), color, cv2.FILLED)
         cv2.putText(
-            out, label, (x + 3, top - 5), cv2.FONT_HERSHEY_SIMPLEX, font_scale, (255, 255, 255), thickness
+            out, label, (x + 3, top - 5), cv2.FONT_HERSHEY_SIMPLEX, font_scale, (255, 255, 255),
+            text_thickness, cv2.LINE_AA,
         )
     return out
 

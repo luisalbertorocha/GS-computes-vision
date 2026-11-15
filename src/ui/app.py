@@ -27,10 +27,10 @@ if str(ROOT) not in sys.path:
 import cv2  # noqa: E402
 import pandas as pd  # noqa: E402
 import streamlit as st  # noqa: E402
+from PIL import Image  # noqa: E402
 
 from src.config import load_settings  # noqa: E402
 from src.io_utils import read_image  # noqa: E402
-from src.pipeline import draw_overlay  # noqa: E402
 from src.postprocess import output  # noqa: E402
 from src.postprocess import severity  # noqa: E402
 from src.postprocess.geo import TZ_BR  # noqa: E402
@@ -57,6 +57,17 @@ _CSS = """
 .zcv-steps { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 1rem; }
 .zcv-steps figure, .zcv-photo { margin: 0; }
 .zcv-steps img, .zcv-photo img { width: 100%; height: auto; display: block; border-radius: 0.5rem; }
+/* caixas e rótulos em HTML sobre a foto: nítidos em qualquer tamanho, com acentos */
+.zcv-photo { position: relative; }
+.zcv-box { position: absolute; box-sizing: border-box; border-radius: 3px; }
+.zcv-box.is-chosen { border: 3px solid var(--c); box-shadow: 0 0 0 1px rgba(0,0,0,.55), inset 0 0 0 1px rgba(0,0,0,.35); }
+.zcv-box.is-other { border: 2px dashed rgba(236,238,241,.85); box-shadow: 0 0 0 1px rgba(0,0,0,.45); }
+.zcv-tag { position: absolute; left: -3px; bottom: 100%; margin-bottom: 2px; background: var(--c); color: var(--ink);
+  font: 600 0.8rem/1.35 inherit; padding: 0.1rem 0.45rem; border-radius: 4px; white-space: nowrap;
+  box-shadow: 0 1px 3px rgba(0,0,0,.5); }
+.zcv-tag.is-below { bottom: auto; top: 100%; margin: 2px 0 0; }
+.zcv-tag.is-right { left: auto; right: -3px; }
+.zcv-tag.is-other { background: rgba(27,30,35,.85); color: #eceef1; font-weight: 500; }
 .zcv-steps figcaption { font-size: 0.85rem; opacity: 0.7; text-align: center; margin-top: 0.35rem; }
 .zcv-facts { display: grid; grid-template-columns: minmax(0, 11rem) minmax(0, 1fr); gap: 0.55rem 1.25rem; margin: 0; }
 .zcv-facts dt { opacity: 0.65; }
@@ -157,19 +168,11 @@ def _row_thumb(image_id: str, annotated: Path) -> str | None:
     return _embedded(paths.thumbs / f"{image_id}.jpg") or _embedded(annotated, thumb=True)
 
 
-@st.cache_data(max_entries=32, show_spinner=False)
-def _highlight_uri(original: str, mtime: float, chosen: str, boxes: tuple) -> str | None:
-    """Foto com o dano escolhido em destaque e os outros danos da imagem em cinza."""
-    img = read_image(Path(original))
-    if img is None:
-        return None
-    records = [
-        {"id": i, "bbox": list(bbox), "classe": classe, "confianca": conf, "severidade": sev}
-        for i, bbox, classe, conf, sev in boxes
-    ]
-    overlay = draw_overlay(img, records, highlight_id=chosen)
-    ok, encoded = cv2.imencode(".jpg", overlay, [cv2.IMWRITE_JPEG_QUALITY, 88])
-    return "data:image/jpeg;base64," + base64.b64encode(encoded.tobytes()).decode() if ok else None
+@st.cache_data(max_entries=256, show_spinner=False)
+def _image_size(path: str, mtime: float) -> tuple[int, int]:
+    """(largura, altura) lendo só o cabeçalho do arquivo, sem decodificar a imagem."""
+    with Image.open(path) as img:
+        return img.size
 
 
 def _steps_gallery(images: list[tuple[str, Path]]) -> str:
@@ -385,19 +388,52 @@ def _image_facts(image: dict, name: str) -> str:
     )
 
 
-def _damage_photo(row: dict, rows: list[dict]) -> str | None:
-    """Foto com o dano escolhido em destaque; sem a original guardada, cai na foto anotada."""
-    original = paths.intermediate / "00_original" / f"{row['imagem_id']}.jpg"
-    if original.exists():
-        boxes = tuple(
-            (r["id"], tuple(r["bbox"]), r["classe"], r["confianca"], r["severidade"])
-            for r in rows
-            if r["imagem_id"] == row["imagem_id"]
-        )
-        highlighted = _highlight_uri(str(original), original.stat().st_mtime, row["id"], boxes)
-        if highlighted:
-            return highlighted
-    return _embedded(paths.data / row["img_anotada"])
+def _box_html(box: list[int], size: tuple[int, int], chosen: bool, tag: str, color: str) -> str:
+    """Uma caixa posicionada em % da foto, para acompanhar o tamanho em que ela é exibida."""
+    width, height = size
+    x, y, w, h = box
+    left, top = 100 * x / width, 100 * y / height
+    style = (
+        f"left:{left:.2f}%;top:{top:.2f}%;width:{100 * w / width:.2f}%;height:{100 * h / height:.2f}%;"
+        f"--c:{color};--ink:{'#0b0b0b' if color == SEVERITY['média'][2] else '#ffffff'}"
+    )
+    place = (" is-below" if top < 9 else "") + (" is-right" if left > 60 else "")
+    kind = "is-chosen" if chosen else "is-other"
+    return (
+        f'<div class="zcv-box {kind}" style="{style}">'
+        f'<span class="zcv-tag {kind}{place}">{html.escape(tag)}</span></div>'
+    )
+
+
+def _photo_html(image_id: str, chosen: dict | None, rows: list[dict], names: dict[str, str]) -> str | None:
+    """Foto original (sem recompressão) com as caixas por cima, desenhadas pelo navegador.
+
+    O dano escolhido aparece com a cor da severidade e o rótulo completo; os outros danos
+    da mesma imagem, tracejados, só com o nome. Sem a original guardada (dados antigos),
+    usa a foto anotada pelo pipeline.
+    """
+    original = paths.intermediate / "00_original" / f"{image_id}.jpg"
+    if not original.exists():
+        annotated = _embedded(paths.annotated / f"{image_id}.jpg")
+        if not annotated:
+            return None
+        return f'<figure class="zcv-photo"><img src="{annotated}" alt="Foto com os danos marcados"></figure>'
+
+    size = _image_size(str(original), original.stat().st_mtime)
+    boxes = []
+    others = [r for r in rows if r["imagem_id"] == image_id and (chosen is None or r["id"] != chosen["id"])]
+    for r in others:
+        boxes.append(_box_html(r["bbox"], size, False, names.get(r["id"], "outro dano").split(" · ")[-1], ""))
+    if chosen is not None:  # por último: fica por cima das outras caixas
+        _, label, color = SEVERITY.get(chosen["severidade"], ("", chosen["severidade"], "#888888"))
+        tag = f"{_kind(chosen['classe'])} · {chosen['confianca'] * 100:.0f}% · {label}"
+        boxes.append(_box_html(chosen["bbox"], size, True, tag, color))
+    alt = "Foto com o dano escolhido em destaque" if chosen else "Foto analisada, sem danos detectados"
+    return (
+        f'<figure class="zcv-photo"><img src="{_embedded(original)}" alt="{alt}">'
+        + "".join(boxes)
+        + "</figure>"
+    )
 
 
 def _transformations(
@@ -425,14 +461,12 @@ def _transformations(
         if chosen in clean_by_key:
             image = clean_by_key[chosen]
             image_id = image["imagem_id"]
-            photo_uri = _embedded(paths.annotated / f"{image_id}.jpg")
-            alt = "Foto analisada, sem danos detectados"
+            photo_html = _photo_html(image_id, None, rows, names)
             facts = _image_facts(image, f"Imagem {numbers[image_id]}")
         else:
             row = next(r for r in rows if r["id"] == chosen)
             image_id = row["imagem_id"]
-            photo_uri = _damage_photo(row, rows)
-            alt = "Foto com o dano escolhido em destaque"
+            photo_html = _photo_html(image_id, row, rows, names)
             facts = _facts(row, names[chosen])
         steps = [
             (label, paths.intermediate / step / f"{image_id}.jpg") for step, label in STEP_LABELS.items()
@@ -449,8 +483,8 @@ def _transformations(
             loading.info("⏳ Carregando as transformações…")
 
         photo, details = st.columns([3, 2], gap="large")
-        if photo_uri:
-            photo.html(f'<figure class="zcv-photo"><img src="{photo_uri}" alt="{alt}"></figure>')
+        if photo_html:
+            photo.html(photo_html)
         details.html(facts)
 
         st.subheader("Etapas do pré-processamento")
