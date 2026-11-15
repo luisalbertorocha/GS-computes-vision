@@ -7,6 +7,8 @@ Com RUN_SCHEDULER_IN_UI=1 o próprio painel sobe o agendador em segundo plano
 """
 from __future__ import annotations
 
+import base64
+import html
 import os
 import sys
 import threading
@@ -57,6 +59,32 @@ st.caption(
     "Imagens de rua entram sozinhas, passam por anonimização e pré-processamento, "
     "e cada dano detectado é medido, priorizado e vira um chamado."
 )
+
+
+@st.cache_data(max_entries=128, show_spinner=False)
+def _data_uri(path: str, mtime: float) -> str:
+    """Imagem embutida em base64; `mtime` invalida o cache quando o arquivo muda."""
+    return "data:image/jpeg;base64," + base64.b64encode(Path(path).read_bytes()).decode()
+
+
+_GALLERY_CSS = """
+<style>
+.zcv-steps { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 1rem; }
+.zcv-steps figure { margin: 0; }
+.zcv-steps img { width: 100%; height: auto; display: block; border-radius: 0.5rem; }
+.zcv-steps figcaption { font-size: 0.85rem; opacity: 0.7; text-align: center; margin-top: 0.35rem; }
+</style>
+"""
+
+
+def _steps_gallery(images: list[tuple[str, Path]]) -> str:
+    """Grade responsiva com as imagens embutidas: chegam junto com a página, sem download à parte."""
+    figures = "".join(
+        f'<figure><img src="{_data_uri(str(p), p.stat().st_mtime)}" alt="{html.escape(label)}">'
+        f"<figcaption>{html.escape(label)}</figcaption></figure>"
+        for label, p in images
+    )
+    return f'{_GALLERY_CSS}<div class="zcv-steps">{figures}</div>'
 
 
 @st.fragment(run_every="30s")
@@ -119,9 +147,17 @@ def dashboard() -> None:
             ]
             images.append(("Detecções anotadas", paths.data / row["img_anotada"]))
             images = [(label, p) for label, p in images if p.exists()]
-            for start in range(0, len(images), 3):
-                for col, (label, path) in zip(st.columns(3), images[start : start + 3]):
-                    col.image(str(path), caption=label, use_container_width=True)
+            # Aviso de carregamento só quando a detecção muda (não a cada atualização de 30 s).
+            # Não usa st.spinner: ele só aparece após 0,5 s, e ler os arquivos é mais rápido
+            # que isso; a espera real é a transferência das imagens até o navegador. Como as
+            # imagens vão embutidas no HTML, o aviso só some depois que elas chegam.
+            changed = st.session_state.get("_det_exibida") != chosen
+            loading = st.empty()
+            if changed:
+                loading.info("⏳ Carregando as transformações…")
+            st.html(_steps_gallery(images))
+            loading.empty()
+            st.session_state["_det_exibida"] = chosen
             st.subheader("Dados extraídos")
             st.json(row)
 
