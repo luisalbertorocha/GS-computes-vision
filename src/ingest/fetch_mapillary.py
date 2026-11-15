@@ -20,8 +20,10 @@ log = logging.getLogger(__name__)
 
 API_URL = "https://graph.mapillary.com/images"
 FIELDS = "id,thumb_1024_url,computed_geometry,captured_at"
-# candidatas por consulta (máximo da API: 2000); só `mapillary_limit` novas são baixadas por execução
-SEARCH_LIMIT = 500
+# candidatas por consulta (máximo da API: 2000); só `mapillary_limit` novas são baixadas por execução.
+# Valores altos fazem a busca por bbox estourar o timeout em áreas com muitas fotos.
+SEARCH_LIMIT = 100
+SEARCH_TIMEOUT = 60
 
 
 def fetch_mapillary(settings: Settings) -> int:
@@ -33,7 +35,7 @@ def fetch_mapillary(settings: Settings) -> int:
         API_URL,
         params={"fields": FIELDS, "bbox": settings.mapillary_bbox, "limit": SEARCH_LIMIT},
         headers={"Authorization": f"OAuth {settings.mapillary_token}"},
-        timeout=30,
+        timeout=SEARCH_TIMEOUT,
     )
     if response.status_code >= 400:
         # a API devolve o motivo em JSON (token inválido, bbox maior que 0,01 grau², ...)
