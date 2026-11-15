@@ -1,7 +1,10 @@
+import re
+
 from fastapi.testclient import TestClient
 
 from src.api.main import create_app
 from src.pipeline import run_once
+from src.postprocess import output
 
 
 def test_api_smoke(settings, raw_image):
@@ -62,10 +65,16 @@ def test_ui_renders_without_errors(settings, raw_image, monkeypatch):
     assert gallery_html().count("data:image/jpeg;base64,") >= 2
     assert not any("Carregando as transformações" in el.value for el in app.info)
 
-    # trocar para uma detecção de OUTRA imagem troca a grade inteira
+    # o seletor mostra nomes legíveis (número da imagem, classe, severidade, data e hora)
     detections = app.selectbox(key="det")
-    first_image = detections.value.rsplit("_", 1)[0]
-    other = next(o for o in detections.options if o.rsplit("_", 1)[0] != first_image)
+    assert all(re.fullmatch(r"Imagem \d+( · dano \d+)? · \w+ \(\w+\) · \d\d/\d\d/\d{4} \d\d:\d\d", o)
+               for o in detections.options), detections.options
+    assert {o.split(" · ")[0] for o in detections.options} == {"Imagem 1", "Imagem 2"}
+
+    # trocar para uma detecção de OUTRA imagem troca a grade inteira
+    rows = output.read_detections(settings.paths)
+    first_image = next(r["imagem_id"] for r in rows if r["id"] == detections.value)
+    other = next(r["id"] for r in rows if r["imagem_id"] != first_image)
     before = gallery_html()
     detections.select(other).run()
     assert not app.exception and gallery_html() != before

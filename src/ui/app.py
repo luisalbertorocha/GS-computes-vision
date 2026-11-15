@@ -87,6 +87,33 @@ def _steps_gallery(images: list[tuple[str, Path]]) -> str:
     return f'{_GALLERY_CSS}<div class="zcv-steps">{figures}</div>'
 
 
+def _br_datetime(iso: str | None) -> str:
+    """'2026-11-15T05:18:17-03:00' -> '15/11/2026 05:18' (já vem no fuso de Brasília)."""
+    if not iso or len(iso) < 16:
+        return "sem data"
+    return f"{iso[8:10]}/{iso[5:7]}/{iso[0:4]} {iso[11:16]}"
+
+
+def _detection_labels(df: pd.DataFrame) -> dict[str, str]:
+    """Nome legível de cada detecção: 'Imagem 3 · buraco (alta) · 15/11/2026 05:18'.
+
+    As imagens são numeradas pela ordem de processamento, então o número de uma imagem
+    não muda quando chegam novas. Quando uma imagem tem mais de um dano, eles viram
+    'dano 1', 'dano 2'...
+    """
+    order = df.sort_values(["processed_at", "imagem_id"]).drop_duplicates("imagem_id")["imagem_id"]
+    number = {image_id: n for n, image_id in enumerate(order, start=1)}
+    per_image = df.groupby("imagem_id")["id"].transform("count")
+    labels = {}
+    for (_, r), count in zip(df.iterrows(), per_image):
+        damage = f" · dano {int(r['id'].rsplit('_', 1)[1]) + 1}" if count > 1 else ""
+        labels[r["id"]] = (
+            f"Imagem {number[r['imagem_id']]}{damage} · {r['classe']} ({r['severidade']})"
+            f" · {_br_datetime(r['captured_at'])}"
+        )
+    return labels
+
+
 @st.fragment(run_every="30s")
 def dashboard() -> None:
     rows = output.read_detections(paths)
@@ -139,7 +166,8 @@ def dashboard() -> None:
 
         with tab_steps:
             ids = df["id"].tolist()
-            chosen = st.selectbox("Detecção", ids, key="det")
+            labels = _detection_labels(df)
+            chosen = st.selectbox("Detecção", ids, key="det", format_func=labels.get)
             row = next(r for r in rows if r["id"] == chosen)
             images = [
                 (label, paths.intermediate / step / f"{row['imagem_id']}.jpg")
