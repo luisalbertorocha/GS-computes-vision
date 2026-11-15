@@ -14,6 +14,7 @@ from datetime import datetime
 import requests
 
 from src.config import Settings, load_settings
+from src.postprocess import output
 from src.postprocess.geo import TZ_BR
 
 log = logging.getLogger(__name__)
@@ -45,13 +46,17 @@ def fetch_mapillary(settings: Settings) -> int:
             reason = ""
         raise RuntimeError(f"Mapillary respondeu HTTP {response.status_code}. {reason}".strip())
 
+    # ids já baixados alguma vez: a retenção apaga fotos antigas, e sem esta lista elas
+    # seriam baixadas de novo a cada execução
+    seen = output.load_id_set(settings.paths.mapillary_seen)
     downloaded = 0
     for item in response.json().get("data", []):
         if downloaded >= settings.mapillary_limit:
             break
-        target = settings.paths.raw / f"mapillary_{item['id']}.jpg"
+        image_key = str(item["id"])
+        target = settings.paths.raw / f"mapillary_{image_key}.jpg"
         url = item.get("thumb_1024_url")
-        if target.exists() or not url:
+        if image_key in seen or target.exists() or not url:
             continue
         image = requests.get(url, timeout=60)
         image.raise_for_status()
@@ -67,7 +72,10 @@ def fetch_mapillary(settings: Settings) -> int:
         # sidecar antes da imagem: quando a imagem aparece na pasta, os metadados já existem
         target.with_suffix(".json").write_text(json.dumps(meta, ensure_ascii=False), encoding="utf-8")
         target.write_bytes(image.content)
+        seen.add(image_key)
         downloaded += 1
+    if downloaded:
+        output.save_id_set(settings.paths.mapillary_seen, seen)
     log.info("Mapillary: %d imagens novas", downloaded)
     return downloaded
 

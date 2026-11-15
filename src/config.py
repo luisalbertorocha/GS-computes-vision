@@ -51,6 +51,10 @@ class Paths:
     def runs_log(self) -> Path:  # uma linha JSON por execução (evidência da automação)
         return self.out / "runs.jsonl"
 
+    @property
+    def mapillary_seen(self) -> Path:  # ids do Mapillary já baixados (mesmo que a foto já tenha sido removida)
+        return self.out / "mapillary_seen.json"
+
     def ensure(self) -> "Paths":
         for p in (self.raw, self.intermediate, self.annotated, self.tickets, self.logs):
             p.mkdir(parents=True, exist_ok=True)
@@ -84,6 +88,9 @@ class Settings:
     # modo demonstração: quantas imagens de samples/ entram por execução (0 = desligado)
     demo_seed_per_run: int = 0
     samples_dir: Path = ROOT / "samples"
+    # quantas imagens processadas ficam guardadas; ao passar disso as mais antigas são
+    # removidas (0 = sem limite)
+    max_images: int = 200
 
 
 def _env(name: str) -> str | None:
@@ -116,4 +123,5 @@ def load_settings(data_dir: Path | str | None = None) -> Settings:
         interval_seconds=int(_env("PIPELINE_INTERVAL_SECONDS") or 300),
         demo_seed_per_run=int(_env("DEMO_SEED_PER_RUN") or 0),
         samples_dir=Path(_env("SAMPLES_DIR") or ROOT / "samples"),
+        max_images=int(_env("MAX_IMAGES") or 200),
     )

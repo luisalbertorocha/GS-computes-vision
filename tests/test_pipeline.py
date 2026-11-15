@@ -198,6 +198,68 @@ def test_fetch_mapillary_downloads_only_new_images(settings, monkeypatch):
     assert mapillary.fetch_mapillary(settings) == 2  # respeita o limite por execução
     assert mapillary.fetch_mapillary(settings) == 1  # só a que faltava
     assert mapillary.fetch_mapillary(settings) == 0
+    # foto apagada pela retenção não é baixada de novo: o id fica registrado
+    (settings.paths.raw / "mapillary_0.jpg").unlink()
+    assert mapillary.fetch_mapillary(settings) == 0
+    assert output.load_id_set(settings.paths.mapillary_seen) == {"0", "1", "2"}
     meta = json.loads((settings.paths.raw / "mapillary_1.json").read_text(encoding="utf-8"))
     assert abs(meta["lon"] + 46.651) < 1e-9 and meta["lat"] == -23.56
     assert meta["licenca"] == "CC-BY-SA 4.0" and meta["captured_at"].endswith("-03:00")
+
+
+def _add_raw(settings, road_image, name: str, shade: int):
+    """Grava uma imagem distinta em data/raw e devolve (caminho, id da imagem)."""
+    import cv2
+
+    from src.ingest.watch_folder import image_id_for
+
+    path = settings.paths.raw / name
+    cv2.imwrite(str(path), road_image + shade)
+    return path, image_id_for(path)
+
+
+def test_retention_removes_oldest_images_beyond_the_limit(settings, road_image):
+    import os
+    import time
+
+    settings = replace(settings, max_images=2)
+    paths = settings.paths
+    reference = paths.intermediate / "00_original"
+
+    # a mais antiga veio do Mapillary (bruto é apagado); as outras foram colocadas à mão
+    old_raw, old_id = _add_raw(settings, road_image, "mapillary_999.jpg", 1)
+    old_raw.with_suffix(".json").write_text(json.dumps({"fonte": "mapillary"}), encoding="utf-8")
+    assert run_once(settings, detector=_AlwaysHigh())["imagens_removidas"] == 0
+    os.utime(reference / f"{old_id}.jpg", (time.time() - 200,) * 2)
+
+    mid_raw, mid_id = _add_raw(settings, road_image, "manual_b.jpg", 2)
+    assert run_once(settings, detector=_AlwaysHigh())["imagens_removidas"] == 0
+    os.utime(reference / f"{mid_id}.jpg", (time.time() - 100,) * 2)
+
+    new_raw, new_id = _add_raw(settings, road_image, "manual_c.jpg", 3)
+    summary = run_once(settings, detector=_AlwaysHigh())
+    assert summary["imagens_processadas"] == 1 and summary["imagens_removidas"] == 1
+
+    # a mais antiga perdeu etapas, overlay, linhas do parquet e o arquivo bruto do Mapillary
+    assert not list(paths.intermediate.glob(f"*/{old_id}.jpg"))
+    assert not (paths.annotated / f"{old_id}.jpg").exists()
+    assert not old_raw.exists() and not old_raw.with_suffix(".json").exists()
+    assert {r["imagem_id"] for r in output.read_detections(paths)} == {mid_id, new_id}
+    for kept in (mid_id, new_id):
+        assert (reference / f"{kept}.jpg").exists() and (paths.annotated / f"{kept}.jpg").exists()
+
+    # fotos colocadas à mão e chamados já abertos ficam; nada é reprocessado
+    assert mid_raw.exists() and new_raw.exists()
+    assert len(list(paths.tickets.glob("chamado_*.json"))) == 3
+    assert output.load_state(paths) == {old_id, mid_id, new_id}
+    again = run_once(settings, detector=_AlwaysHigh())
+    assert again["imagens_processadas"] == 0 and again["imagens_removidas"] == 0
+
+
+def test_retention_is_disabled_with_zero(settings, road_image):
+    settings = replace(settings, max_images=0)
+    for index, name in enumerate(("a.jpg", "b.jpg", "c.jpg")):
+        _add_raw(settings, road_image, name, index + 1)
+    summary = run_once(settings, detector=_AlwaysHigh())
+    assert summary["imagens_processadas"] == 3 and summary["imagens_removidas"] == 0
+    assert len(list((settings.paths.intermediate / "00_original").glob("*.jpg"))) == 3

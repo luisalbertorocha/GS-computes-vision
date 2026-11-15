@@ -14,6 +14,7 @@ COPY src ./src
 COPY scheduler ./scheduler
 COPY weights ./weights
 COPY samples ./samples
+COPY .streamlit ./.streamlit
 
 RUN useradd --create-home --uid 1000 app && mkdir -p /app/data && chown -R app /app
 USER app

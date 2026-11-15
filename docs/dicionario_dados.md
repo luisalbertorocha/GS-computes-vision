@@ -29,7 +29,8 @@ Caminhos são relativos à pasta `data/`. Na API, as imagens ficam em `/files/<c
 
 | Arquivo | Conteúdo |
 |---|---|
-| `data/out/runs.jsonl` | Uma linha JSON por execução do agendador (início, fim, imagens, danos, chamados, erros) |
+| `data/out/runs.jsonl` | Uma linha JSON por execução do agendador (início, fim, imagens, danos, chamados, erros e `imagens_removidas`: quantas imagens antigas saíram por passar de `MAX_IMAGES`) |
 | `data/out/chamados/chamado_<id>.json` | Gatilho para o robô RPA: um arquivo por dano de severidade alta |
-| `data/out/processed.json` | IDs das imagens já processadas |
+| `data/out/processed.json` | IDs das imagens já processadas (mantidos mesmo depois que a imagem é removida pelo limite) |
+| `data/out/mapillary_seen.json` | IDs do Mapillary já baixados, para uma foto removida pelo limite não ser baixada de novo |
 | `data/out/logs/pipeline.log` | Log textual do agendador |

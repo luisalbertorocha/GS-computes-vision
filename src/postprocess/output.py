@@ -72,18 +72,36 @@ def read_detections(paths: Paths) -> list[dict]:
     return records
 
 
+def remove_images(paths: Paths, image_ids: set[str]) -> int:
+    """Tira do parquet as detecções das imagens removidas pela retenção. Retorna quantas saíram."""
+    if not image_ids or not paths.parquet.exists():
+        return 0
+    df = pd.read_parquet(paths.parquet)
+    kept = df[~df["imagem_id"].isin(image_ids)]
+    if len(kept) == len(df):
+        return 0
+    _atomic_write(paths.parquet, lambda tmp: kept.to_parquet(tmp, index=False))
+    return len(df) - len(kept)
+
+
 # ---------- estado (idempotência) ----------
 
-def load_state(paths: Paths) -> set[str]:
-    if not paths.state.exists():
+def load_id_set(path: Path) -> set[str]:
+    if not path.exists():
         return set()
-    return set(json.loads(paths.state.read_text(encoding="utf-8")))
+    return set(json.loads(path.read_text(encoding="utf-8")))
+
+
+def save_id_set(path: Path, ids: set[str]) -> None:
+    _atomic_write(path, lambda tmp: tmp.write_text(json.dumps(sorted(ids)), encoding="utf-8"))
+
+
+def load_state(paths: Paths) -> set[str]:
+    return load_id_set(paths.state)
 
 
 def save_state(paths: Paths, processed: set[str]) -> None:
-    _atomic_write(
-        paths.state, lambda tmp: tmp.write_text(json.dumps(sorted(processed)), encoding="utf-8")
-    )
+    save_id_set(paths.state, processed)
 
 
 # ---------- log de execuções ----------
@@ -91,6 +109,17 @@ def save_state(paths: Paths, processed: set[str]) -> None:
 def log_run(paths: Paths, summary: dict) -> None:
     with paths.runs_log.open("a", encoding="utf-8") as fh:
         fh.write(json.dumps(summary, ensure_ascii=False) + "\n")
+
+
+def first_run(paths: Paths) -> dict | None:
+    """A execução mais antiga registrada: mostra desde quando existe histórico neste disco."""
+    if not paths.runs_log.exists():
+        return None
+    with paths.runs_log.open(encoding="utf-8") as fh:
+        for line in fh:
+            if line.strip():
+                return json.loads(line)
+    return None
 
 
 def read_runs(paths: Paths, limit: int = 50) -> list[dict]:

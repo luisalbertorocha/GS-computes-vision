@@ -11,4 +11,5 @@ requests>=2.31
 python-dotenv>=1.0
 fastapi>=0.110
 uvicorn[standard]>=0.29
-streamlit>=1.37
+# >=1.44: cartões de métrica com borda, st.pills, selos em markdown e st.rerun(scope=...)
+streamlit>=1.44

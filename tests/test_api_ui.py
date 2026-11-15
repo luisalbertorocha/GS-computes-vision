@@ -57,10 +57,29 @@ def test_ui_renders_without_errors(settings, raw_image, monkeypatch):
     app = AppTest.from_file("../src/ui/app.py", default_timeout=60).run()
     assert not app.exception
     assert app.metric[0].label == "Danos detectados" and int(app.metric[0].value) >= 1
+    assert [m.label for m in app.metric] == [
+        "Danos detectados", "Severidade alta", "Chamados abertos", "Imagens guardadas", "Última execução"
+    ]
+    assert app.metric[3].value == "2 de 200"  # imagens guardadas / limite da retenção
+    assert not app.warning  # execução sem erros não mostra aviso
+
+    # ranking: colunas legíveis e miniatura embutida em cada linha
+    ranking = app.dataframe[0].value
+    assert list(ranking.columns) == [
+        "Foto", "Imagem", "Tipo", "Severidade", "Score", "Confiança", "Área", "Local", "Capturada em", "Fonte"
+    ]
+    assert ranking["Foto"].str.startswith("data:image/jpeg;base64,").all()
+    assert ranking["Local"].iloc[0] == "-23.56140, -46.65590"
 
     # aba Transformações: imagens embutidas na grade e aviso de carregamento já removido
+    def html_block(marker: str) -> str:
+        return next(el.proto.body for el in app.get("html") if marker in el.proto.body)
+
     def gallery_html() -> str:
-        return next(el.proto.body for el in app.get("html") if "zcv-steps" in el.proto.body)
+        return html_block('class="zcv-steps"')
+
+    assert "data:image/jpeg;base64," in html_block('class="zcv-photo"')  # foto anotada em destaque
+    assert "Severidade" in html_block('class="zcv-facts"')
 
     assert gallery_html().count("data:image/jpeg;base64,") >= 2
     assert not any("Carregando as transformações" in el.value for el in app.info)
@@ -79,3 +98,17 @@ def test_ui_renders_without_errors(settings, raw_image, monkeypatch):
     detections.select(other).run()
     assert not app.exception and gallery_html() != before
     assert not any("Carregando as transformações" in el.value for el in app.info)
+
+
+def test_ui_warns_when_the_last_run_had_errors(settings, monkeypatch):
+    from streamlit.testing.v1 import AppTest
+
+    (settings.paths.raw / "quebrada.jpg").write_bytes(b"nao sou uma imagem")
+    run_once(settings)
+    monkeypatch.setenv("DATA_DIR", str(settings.paths.data))
+    monkeypatch.delenv("RUN_SCHEDULER_IN_UI", raising=False)
+    app = AppTest.from_file("../src/ui/app.py", default_timeout=60).run()
+    assert not app.exception
+    assert len(app.warning) == 1 and "quebrada.jpg" in app.warning[0].value
+    assert app.metric[3].value == "0 de 200"
+    assert any("Nenhum dano registrado ainda" in el.value for el in app.info)  # estado vazio orienta

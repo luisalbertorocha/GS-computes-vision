@@ -1,0 +1,8 @@
+# Tema do painel: asfalto escuro com azul de placa de sinalização como destaque.
+# O destaque não usa vermelho, amarelo nem verde: essas cores são só da severidade.
+[theme]
+base = "dark"
+primaryColor = "#4c8dff"
+backgroundColor = "#1b1e23"
+secondaryBackgroundColor = "#262a31"
+textColor = "#eceef1"

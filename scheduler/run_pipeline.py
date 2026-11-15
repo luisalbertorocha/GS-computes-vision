@@ -41,13 +41,15 @@ def main() -> None:
     while True:
         summary = run_once(settings, detector)
         log.info(
-            "run %s: %d coletada(s), %d amostra(s), %d processada(s), %d dano(s), %d chamado(s), %d erro(s)",
+            "run %s: %d coletada(s), %d amostra(s), %d processada(s), %d dano(s), %d chamado(s), "
+            "%d removida(s), %d erro(s)",
             summary["run_id"],
             summary["imagens_coletadas"],
             summary["imagens_amostra"],
             summary["imagens_processadas"],
             summary["danos_detectados"],
             summary["chamados_abertos"],
+            summary["imagens_removidas"],
             len(summary["erros"]),
         )
         if not args.loop:

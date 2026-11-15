@@ -140,6 +140,18 @@ correção de perspectiva. Danos de severidade alta devem ser validados por uma 
 | Mapillary | `MAPILLARY_TOKEN` e `MAPILLARY_BBOX` no `.env`; cada execução baixa até `MAPILLARY_LIMIT` imagens novas da região (a área da bbox precisa ser menor que 0,01 grau²) |
 | Modo demonstração | `DEMO_SEED_PER_RUN=1`: uma imagem de `samples/` por execução, identificada na coluna `fonte` |
 
+### Limite de imagens guardadas
+
+Cada imagem processada ocupa cerca de 0,8 MB (original anonimizada, etapas e overlay).
+Para a pasta `data/` não crescer até encher o disco, só as `MAX_IMAGES` mais recentes
+ficam guardadas (padrão: 200; `0` desliga o limite). Ao passar do limite, cada execução
+remove das imagens mais antigas as etapas, o overlay e as linhas do parquet, e registra
+quantas saíram em `imagens_removidas` no `runs.jsonl`.
+
+Não são removidos: os chamados já abertos, as fotos colocadas à mão em `data/raw/` e as
+amostras de demonstração. Uma imagem removida nunca é processada nem baixada de novo
+(`processed.json` e `mapillary_seen.json` guardam os ids).
+
 Agendamento: `docker compose` (serviço `scheduler`), `python -m scheduler.run_pipeline --loop`,
 cron/Agendador de Tarefas chamando `python -m scheduler.run_pipeline`, ou a DAG
 do Airflow em [scheduler/dag_zeladoria.py](scheduler/dag_zeladoria.py).
@@ -155,6 +167,12 @@ ficar vazia em plataformas com disco efêmero.
 | Render | New > Blueprint > selecionar o repositório (usa [render.yaml](render.yaml)) |
 | Hugging Face Spaces | Criar um Space com SDK **Docker**, enviar o repositório e acrescentar ao topo do README do Space o bloco `---`/`sdk: docker`/`app_port: 8501`/`---` |
 | Qualquer VM | `docker compose up -d --build` e liberar as portas 8501 e 8000 |
+
+No plano gratuito do Render o disco é temporário: a pasta `data/` volta vazia a cada
+deploy, a cada mudança de variável de ambiente e quando o serviço acorda depois de ficar
+parado. O histórico recomeça e a coleta enche o painel de novo sozinha; o próprio painel
+avisa isso e mostra desde quando há histórico. Para manter os dados entre deploys é preciso
+um disco persistente (pago) ou rodar com `docker compose`, que usa a pasta `./data`.
 
 Para coleta real no deploy, cadastre `MAPILLARY_TOKEN`, `MAPILLARY_BBOX` e `WEBHOOK_URL`
 como variáveis de ambiente da plataforma (nunca no repositório).
@@ -203,7 +221,10 @@ data/              DATASETS.md + pastas geradas (fora do git)
   `calcada_quebrada` depende de fotos anotadas pelo grupo.
 - A área em cm² depende de uma escala assumida (`SCENE_WIDTH_CM`) ou de `cm_per_px` informado por imagem.
 - A anonimização pode falhar em rostos muito pequenos ou de costas e em placas inclinadas.
-- A coleta pelo Mapillary foi testada com respostas simuladas; falta validar com um token real.
+- A coleta pelo Mapillary devolve fotos em sequência do mesmo trajeto, então os pontos tendem a
+  ficar concentrados em um trecho da área configurada, e não espalhados por ela.
+- O histórico é limitado a `MAX_IMAGES` imagens e, em hospedagem com disco temporário (Render
+  gratuito), recomeça a cada deploy.
 
 ## Licenças de terceiros
 

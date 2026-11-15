@@ -17,6 +17,7 @@ from src.io_utils import read_image, write_image
 from src.model.infer import load_detector
 from src.postprocess import output
 from src.postprocess.geo import image_metadata, now_iso
+from src.postprocess.retention import prune_old_images
 from src.postprocess.severity import severity_label, severity_score
 from src.preprocess.pipeline import run_preprocess
 from src.privacy.blur_faces_plates import anonymize
@@ -147,6 +148,7 @@ def run_once(settings: Settings, detector=None, trigger: str = "agendado") -> di
     output.append_detections(paths, records)
     tickets = output.open_tickets(paths, records, settings.webhook_url, settings.ticket_min_confidence)
     output.save_state(paths, processed)
+    removed = prune_old_images(settings)
 
     summary = {
         "run_id": uuid.uuid4().hex[:8],
@@ -158,6 +160,7 @@ def run_once(settings: Settings, detector=None, trigger: str = "agendado") -> di
         "imagens_processadas": done,
         "danos_detectados": len(records),
         "chamados_abertos": tickets,
+        "imagens_removidas": removed,
         "modelo": getattr(detector, "name", None),
         "erros": errors,
     }
