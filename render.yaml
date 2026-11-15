@@ -1,0 +1,20 @@
+# Blueprint do Render (https://render.com): New > Blueprint > selecionar este repositório.
+# Sobe a imagem do Dockerfile como um único serviço web: painel + agendador + modo demonstração.
+services:
+  - type: web
+    name: zeladoria-cv
+    runtime: docker
+    plan: free
+    healthCheckPath: /_stcore/health
+    envVars:
+      - key: DEMO_SEED_PER_RUN
+        value: "1"
+      - key: PIPELINE_INTERVAL_SECONDS
+        value: "60"
+      # Preencher no painel do Render (não versionar segredos):
+      - key: MAPILLARY_TOKEN
+        sync: false
+      - key: MAPILLARY_BBOX
+        sync: false
+      - key: WEBHOOK_URL
+        sync: false

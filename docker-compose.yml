@@ -1,0 +1,35 @@
+x-app: &app
+  build: .
+  env_file:
+    - path: .env
+      required: false
+  volumes:
+    - ./data:/app/data
+  restart: unless-stopped
+
+# Sobrescreve os padrões da imagem (que são os do deploy de container único).
+# Modo demonstração e intervalo vêm do .env; aqui o agendador é um serviço separado.
+x-env: &env
+  RUN_SCHEDULER_IN_UI: "0"
+  DEMO_SEED_PER_RUN: ${DEMO_SEED_PER_RUN:-0}
+  PIPELINE_INTERVAL_SECONDS: ${PIPELINE_INTERVAL_SECONDS:-300}
+
+services:
+  scheduler:
+    <<: *app
+    environment: *env
+    command: python -m scheduler.run_pipeline --loop
+
+  api:
+    <<: *app
+    environment: *env
+    command: uvicorn src.api.main:app --host 0.0.0.0 --port 8000
+    ports:
+      - "8000:8000"
+
+  ui:
+    <<: *app
+    environment: *env
+    command: streamlit run src/ui/app.py --server.port=8501 --server.address=0.0.0.0 --server.headless=true --browser.gatherUsageStats=false
+    ports:
+      - "8501:8501"

@@ -1,0 +1,10 @@
+| id | classe | confianca | bbox | area_cm2 | score_severidade | severidade | lat | lon | fonte |
+|---|---|---|---|---|---|---|---|---|---|
+| det_5c12b2558630_00 | buraco | 0.847 | [385, 71, 187, 88] | 2038.2 | 0.5713 | média |  |  | RDD2022 (amostra de demonstração) |
+| det_5c12b2558630_01 | buraco | 0.405 | [602, 90, 81, 37] | 375.9 | 0.3998 | baixa |  |  | RDD2022 (amostra de demonstração) |
+| det_ac1481462be9_00 | buraco | 0.496 | [0, 428, 324, 290] | 23251.8 | 0.8992 | alta |  |  | RDD2022 (amostra de demonstração) |
+| det_c91906f0b3c1_01 | buraco | 0.286 | [326, 462, 393, 180] | 17494.9 | 0.8572 | alta |  |  | RDD2022 (amostra de demonstração) |
+| det_a0e7a5b077e9_00 | trinca | 0.87 | [0, 343, 592, 256] | 20291.2 | 0.794 | alta |  |  | RDD2022 (amostra de demonstração) |
+| det_c91906f0b3c1_00 | buraco | 0.744 | [70, 577, 86, 44] | 947.5 | 0.4962 | média |  |  | RDD2022 (amostra de demonstração) |
+| det_1d4fcde0a823_00 | buraco | 0.762 | [88, 578, 62, 42] | 660.3 | 0.4854 | média |  |  | RDD2022 (amostra de demonstração) |
+| det_e0c24df435a6_00 | trinca | 0.934 | [16, 511, 104, 108] | 1325.8 | 0.3731 | baixa |  |  | RDD2022 (amostra de demonstração) |

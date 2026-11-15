@@ -1,0 +1,13 @@
+{
+  "id": "det_a0e7a5b077e9_00",
+  "classe": "trinca",
+  "severidade": "alta",
+  "score_severidade": 0.794,
+  "confianca": 0.87,
+  "area_cm2": 20291.2,
+  "lat": null,
+  "lon": null,
+  "captured_at": "2026-11-14T06:42:57-03:00",
+  "img_anotada": "out/annotated/a0e7a5b077e9.jpg",
+  "descricao": "Dano em via detectado automaticamente: trinca, área estimada 20291 cm², severidade alta (localização não informada). Requer validação humana antes do reparo."
+}

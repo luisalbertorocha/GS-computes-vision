@@ -1,0 +1,121 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 580" width="1280" height="580" font-family="Segoe UI, Arial, sans-serif">
+  <defs>
+    <marker id="seta" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#44505f"/>
+    </marker>
+    <style>
+      .t { font-size: 15px; font-weight: 600; fill: #1c2530; text-anchor: middle; }
+      .d { font-size: 12px; fill: #44505f; text-anchor: middle; }
+      .h { font-size: 13px; font-weight: 600; fill: #44505f; letter-spacing: .04em; }
+      .l { stroke: #44505f; stroke-width: 1.6; fill: none; }
+      .etapa { fill: #eef4ff; stroke: #3b6fd4; stroke-width: 1.5; }
+      .priv { fill: #fdefef; stroke: #c0392b; stroke-width: 1.5; }
+      .ia { fill: #eef9f0; stroke: #2e8b57; stroke-width: 1.5; }
+      .saida { fill: #fff8e6; stroke: #c98a00; stroke-width: 1.5; }
+      .uso { fill: #f3eeff; stroke: #6b4fbb; stroke-width: 1.5; }
+      .ext { fill: #f4f5f7; stroke: #7b8794; stroke-width: 1.5; stroke-dasharray: 5 4; }
+    </style>
+  </defs>
+  <rect width="1280" height="580" fill="#ffffff"/>
+
+  <text x="30" y="40" class="h">FLUXO AUTOMÁTICO — NENHUMA ETAPA DEPENDE DE CLIQUE HUMANO</text>
+
+  <!-- linha 1: pipeline -->
+  <rect x="30" y="60" width="180" height="120" rx="8" class="ext"/>
+  <text x="120" y="88" class="t">Fontes de imagem</text>
+  <text x="120" y="112" class="d">API do Mapillary</text>
+  <text x="120" y="130" class="d">pasta monitorada data/raw</text>
+  <text x="120" y="148" class="d">amostras (modo demo)</text>
+
+  <rect x="238" y="60" width="180" height="120" rx="8" class="etapa"/>
+  <text x="328" y="88" class="t">1 · Ingestão agendada</text>
+  <text x="328" y="112" class="d">agendador em loop, cron</text>
+  <text x="328" y="130" class="d">ou DAG do Airflow</text>
+  <text x="328" y="148" class="d">hash evita reprocessar</text>
+
+  <rect x="446" y="60" width="180" height="120" rx="8" class="priv"/>
+  <text x="536" y="88" class="t">2 · Anonimização</text>
+  <text x="536" y="112" class="d">rostos (YuNet) e placas</text>
+  <text x="536" y="130" class="d">desfoque gaussiano</text>
+  <text x="536" y="148" class="d">antes de gravar em disco</text>
+
+  <rect x="654" y="60" width="180" height="120" rx="8" class="etapa"/>
+  <text x="744" y="88" class="t">3 · Pré-processamento</text>
+  <text x="744" y="112" class="d">letterbox 640×640</text>
+  <text x="744" y="130" class="d">CLAHE (LAB) · bilateral</text>
+  <text x="744" y="148" class="d">ROI · Canny + morfologia</text>
+
+  <rect x="862" y="60" width="180" height="120" rx="8" class="ia"/>
+  <text x="952" y="88" class="t">4 · Detecção (IA)</text>
+  <text x="952" y="112" class="d">YOLOv8 com fine-tuning</text>
+  <text x="952" y="130" class="d">ONNX via cv2.dnn</text>
+  <text x="952" y="148" class="d">classes: trinca, buraco</text>
+
+  <rect x="1070" y="60" width="180" height="120" rx="8" class="etapa"/>
+  <text x="1160" y="88" class="t">5 · Pós-processamento</text>
+  <text x="1160" y="112" class="d">área estimada em cm²</text>
+  <text x="1160" y="130" class="d">score e faixa de severidade</text>
+  <text x="1160" y="148" class="d">lat/lon e data de captura</text>
+
+  <path class="l" marker-end="url(#seta)" d="M210 120 H236"/>
+  <path class="l" marker-end="url(#seta)" d="M418 120 H444"/>
+  <path class="l" marker-end="url(#seta)" d="M626 120 H652"/>
+  <path class="l" marker-end="url(#seta)" d="M834 120 H860"/>
+  <path class="l" marker-end="url(#seta)" d="M1042 120 H1068"/>
+
+  <!-- barramento para as saídas -->
+  <path class="l" d="M1160 180 V230 H140"/>
+  <path class="l" marker-end="url(#seta)" d="M140 230 V288"/>
+  <path class="l" marker-end="url(#seta)" d="M390 230 V288"/>
+  <path class="l" marker-end="url(#seta)" d="M640 230 V288"/>
+  <path class="l" marker-end="url(#seta)" d="M890 230 V288"/>
+
+  <!-- linha 2: saídas -->
+  <text x="30" y="216" class="h">SAÍDAS (SÓ IMAGENS JÁ ANONIMIZADAS)</text>
+
+  <rect x="30" y="290" width="220" height="100" rx="8" class="saida"/>
+  <text x="140" y="318" class="t">detections.parquet</text>
+  <text x="140" y="342" class="d">uma linha por dano:</text>
+  <text x="140" y="360" class="d">classe, bbox, área, severidade, geo</text>
+
+  <rect x="280" y="290" width="220" height="100" rx="8" class="saida"/>
+  <text x="390" y="318" class="t">Imagens por etapa</text>
+  <text x="390" y="342" class="d">data/intermediate/&lt;etapa&gt;/</text>
+  <text x="390" y="360" class="d">+ overlay em out/annotated/</text>
+
+  <rect x="530" y="290" width="220" height="100" rx="8" class="saida"/>
+  <text x="640" y="318" class="t">Chamados</text>
+  <text x="640" y="342" class="d">severidade alta: JSON em</text>
+  <text x="640" y="360" class="d">out/chamados/ + POST no webhook</text>
+
+  <rect x="780" y="290" width="220" height="100" rx="8" class="saida"/>
+  <text x="890" y="318" class="t">runs.jsonl + log</text>
+  <text x="890" y="342" class="d">registro de cada execução:</text>
+  <text x="890" y="360" class="d">evidência da automação</text>
+
+  <!-- consumo -->
+  <rect x="1060" y="290" width="190" height="44" rx="8" class="uso"/>
+  <text x="1155" y="317" class="t">API · FastAPI</text>
+  <rect x="1060" y="346" width="190" height="44" rx="8" class="uso"/>
+  <text x="1155" y="373" class="t">Painel · Streamlit</text>
+  <path class="l" marker-end="url(#seta)" d="M1000 340 H1058"/>
+
+  <!-- linha 3: integrações -->
+  <text x="30" y="452" class="h">QUEM USA</text>
+
+  <rect x="30" y="470" width="220" height="70" rx="8" class="ext"/>
+  <text x="140" y="500" class="t">Pipeline de Dados</text>
+  <text x="140" y="520" class="d">Airflow orquestra e consome</text>
+
+  <rect x="530" y="470" width="220" height="70" rx="8" class="ext"/>
+  <text x="640" y="500" class="t">Robô RPA</text>
+  <text x="640" y="520" class="d">abre o chamado no portal</text>
+
+  <rect x="1030" y="470" width="220" height="70" rx="8" class="ext"/>
+  <text x="1140" y="500" class="t">Gestor público e cidadão</text>
+  <text x="1140" y="520" class="d">ranking, mapa e evidências</text>
+
+  <path class="l" marker-end="url(#seta)" d="M140 390 V468"/>
+  <path class="l" marker-end="url(#seta)" d="M640 390 V468"/>
+  <path class="l" marker-end="url(#seta)" d="M1155 390 V468"/>
+</svg>

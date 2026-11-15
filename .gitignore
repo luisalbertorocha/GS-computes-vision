@@ -1,0 +1,27 @@
+# segredos
+.env
+.env.*
+!.env.example
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# dados gerados (imagens brutas podem conter rostos/placas: nunca versionar)
+data/raw/*
+data/intermediate/*
+data/out/*
+data/dataset/
+data/rdd2022/
+!data/**/.gitkeep
+
+# gerado por docs/build_pdf.py
+docs/*.html
+
+# treino
+runs/
+*.pt
+!weights/best.pt
+notebooks/.ipynb_checkpoints/
